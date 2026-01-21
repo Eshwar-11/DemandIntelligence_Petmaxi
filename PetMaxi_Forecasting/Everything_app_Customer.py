@@ -2672,7 +2672,7 @@ class MonteCarloForecaster:
             dbc.Row([
                 dbc.Col([
                     dbc.Card([
-                        dbc.CardHeader("📈 Monte Carlo Forecast"),
+                        dbc.CardHeader("📈 Model(s) Forecast"),
                         dbc.CardBody([
                             dcc.Graph(id='forecast-chart')
                         ])
@@ -3218,8 +3218,8 @@ class MonteCarloForecaster:
                             if not metrics or 'rmse' not in metrics:
                                 continue
 
-                            if metrics['rmse'] < best_rmse:
-                                best_rmse = metrics['rmse']
+                            if metrics['mape'] < best_rmse: #rmse → mape
+                                best_rmse = metrics['mape'] #rmse → mape
                                 best_model_name = model_name
                                 best_result = model_result
 
@@ -3230,7 +3230,7 @@ class MonteCarloForecaster:
                             ])
 
                         table = self.create_metrics_table(best_result, window_data, metric)
-                        title = f"Metrics for {w_label} – Best Model: {best_model_name} (RMSE: {best_rmse:.2f})"
+                        title = f"Metrics for {w_label} – Best Model: {best_model_name} (MAPE: {best_rmse:.2f})" #rmse → mape
 
                         return html.Div([
                             html.H6(title, className="text-center mb-3"),
