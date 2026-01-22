@@ -3019,7 +3019,7 @@ class MonteCarloForecaster:
                         ))
 
                 fig.update_layout(
-                    title=f"Training Window Comparison – {selected_sku} ({selected_metric})",
+                    #title=f"Training Window Comparison – {selected_sku} ({selected_metric})",
                     xaxis_title="Forecast Date",
                     yaxis_title=selected_metric.upper(),
                     hovermode="x unified",
