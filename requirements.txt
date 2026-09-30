@@ -1,0 +1,16 @@
+# PetMaxi Forecasting v7 — Python dependencies
+# Tested on Python 3.14.0 (local environment)
+
+# Core
+numpy>=1.26
+pandas>=2.1
+openpyxl>=3.1            # pandas needs this for .xlsx read/write
+
+# Forecasting engine
+statsmodels>=0.14
+scikit-learn>=1.4
+
+# Dashboard backend
+flask>=3.0
+flask-cors>=4.0
+werkzeug>=3.0            # ships with flask, listed explicitly for DispatcherMiddleware

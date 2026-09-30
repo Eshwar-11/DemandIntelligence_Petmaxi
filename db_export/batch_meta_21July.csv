@@ -1,0 +1,5 @@
+id,run_at,data_file,total_skus,forecastable,run_type,status,duration_sec,portfolio_total_volume,gap_weeks,gap_days,weekly_data_as_of,daily_data_as_of
+1,2026-07-16 16:14,data/vendas_1_1.xlsx,50,48,manual,INSTALLMENT (634 left),466.144837,238115.834095,10,67,2026-05-11,2026-05-11
+2,2026-07-17 13:17,data/vendas_1_1.xlsx,200,196,manual,INSTALLMENT (434 left),2004.216832,238115.834095,10,68,2026-05-11,2026-05-11
+3,2026-07-17 14:02,data/vendas_1_1.xlsx,200,176,manual,INSTALLMENT (234 left),2306.244759,238115.834095,10,68,2026-05-11,2026-05-11
+4,2026-07-17 15:11,data/vendas_1_1.xlsx,234,227,manual,INSTALLMENT (0 left),12109.511446,238115.834095,10,68,2026-05-11,2026-05-11
