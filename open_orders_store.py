@@ -520,6 +520,113 @@ def open_order_gap_tons_for_sku(sku: str, basis: str = "pending") -> float:
     return float(aggregate_for_sku(sku).get(col, 0.0) or 0.0)
 
 
+# ── Horizon-capped helpers (gap-alignment rework, Oct 2026) ─────────────────
+# The dashboard gap formula sums open-orders only up to a target date
+# (today + horizon_days). There is no lower bound: orders whose delivery_date
+# is already in the past still count (delayed orders stay in until fulfilled).
+# A missing / NULL delivery_date is counted at every horizon so a SKU is not
+# silently dropped because the host omitted the date; that is the safest
+# default for Bruno's planner view.
+#
+# basis: ordered | reserved | pending | transformed (default pending)
+# horizon_days: 0 = today only (delivery_date <= today),
+#               N = delivery_date <= today + N days.
+
+_BASIS_COL_RAW = {
+    "ordered":     "ordered_quantity",
+    "reserved":    "reserved_quantity",
+    "pending":     "pending_quantity",
+    "transformed": "transformed_quantity",
+}
+
+
+def _capped_proration_sql(basis_col: str) -> str:
+    return (
+        f"COALESCE(SUM(CASE "
+        f"WHEN oi.ordered_quantity > 0 THEN oi.weight_ton * oi.{basis_col} / oi.ordered_quantity "
+        f"WHEN oi.{basis_col} > 0 THEN oi.weight_ton "
+        f"ELSE 0 END), 0)"
+    )
+
+
+def open_order_gap_tons_all_skus_capped(basis: str = "pending",
+                                        horizon_days: int = 0) -> dict:
+    """{sku: tonnes} summing only order lines whose parent order's
+    delivery_date is <= today + horizon_days (or has no delivery_date).
+
+    Prorated to tonnes against the chosen qty basis, exactly like
+    open_order_gap_tons_all_skus but with the date cap applied."""
+    basis_col = _BASIS_COL_RAW.get((basis or "pending").lower(), "pending_quantity")
+    h = int(horizon_days or 0)
+    init_db()
+    conn = _db()
+    rows = conn.execute(
+        f"""SELECT oi.sku AS sku,
+                   {_capped_proration_sql(basis_col)} AS basis_tons
+            FROM open_order_items oi
+            JOIN open_orders o ON o.order_id = oi.order_id
+            WHERE oi.sku IS NOT NULL
+              AND (
+                   o.delivery_date IS NULL
+                   OR o.delivery_date = ''
+                   OR date(substr(o.delivery_date, 1, 10))
+                      <= date('now', '+' || ? || ' days')
+              )
+            GROUP BY oi.sku""",
+        (h,),
+    ).fetchall()
+    conn.close()
+    return {str(r["sku"]): round(float(r["basis_tons"] or 0.0), 3) for r in rows}
+
+
+def open_order_gap_tons_for_sku_capped(sku: str, basis: str = "pending",
+                                       horizon_days: int = 0) -> float:
+    """Single-SKU capped tonnage for the detail endpoint's horizon-wise gap."""
+    basis_col = _BASIS_COL_RAW.get((basis or "pending").lower(), "pending_quantity")
+    h = int(horizon_days or 0)
+    init_db()
+    conn = _db()
+    row = conn.execute(
+        f"""SELECT {_capped_proration_sql(basis_col)} AS basis_tons
+            FROM open_order_items oi
+            JOIN open_orders o ON o.order_id = oi.order_id
+            WHERE oi.sku = ?
+              AND (
+                   o.delivery_date IS NULL
+                   OR o.delivery_date = ''
+                   OR date(substr(o.delivery_date, 1, 10))
+                      <= date('now', '+' || ? || ' days')
+              )""",
+        (str(sku), h),
+    ).fetchone()
+    conn.close()
+    return round(float(row["basis_tons"] or 0.0), 3) if row else 0.0
+
+
+def open_order_skus_capped(horizon_days: int = 0) -> list:
+    """Distinct list of SKUs that have at least one open-order line whose
+    parent order delivers on or before today+horizon_days (or has no
+    delivery_date). Used to build the p=0 SKU universe."""
+    h = int(horizon_days or 0)
+    init_db()
+    conn = _db()
+    rows = conn.execute(
+        """SELECT DISTINCT oi.sku AS sku
+             FROM open_order_items oi
+             JOIN open_orders o ON o.order_id = oi.order_id
+            WHERE oi.sku IS NOT NULL
+              AND (
+                   o.delivery_date IS NULL
+                   OR o.delivery_date = ''
+                   OR date(substr(o.delivery_date, 1, 10))
+                      <= date('now', '+' || ? || ' days')
+              )""",
+        (h,),
+    ).fetchall()
+    conn.close()
+    return [str(r["sku"]) for r in rows]
+
+
 def get_all_orders() -> list:
     init_db()
     conn = _db()

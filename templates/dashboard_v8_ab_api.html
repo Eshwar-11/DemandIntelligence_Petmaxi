@@ -305,6 +305,19 @@ body {
   justify-content: center;
   flex-wrap: nowrap;
 }
+/* Gap-alignment Oct 2026: NF / NEW SKU badges on attention cards */
+.sku-badge {
+  display: inline-block; vertical-align: baseline;
+  padding: 1px 5px; margin-left: 4px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
+  border-radius: 3px; border: 1px solid; line-height: 1.4;
+  font-family: var(--mono);
+}
+.sku-badge.nf  { background: #fff3e0; color: #7a3800; border-color: #e8b870; }
+.sku-badge.new { background: #e3f0ff; color: #1a4a7a; border-color: #78a8d8; }
+html[data-theme="dark"] .sku-badge.nf  { background: #3a2a10; color: #f0b878; border-color: #8a6830; }
+html[data-theme="dark"] .sku-badge.new { background: #0e2a4a; color: #88b8e8; border-color: #3a5a88; }
+
 .grade-chip {
   display: inline-flex; flex-direction: column; align-items: center;
   padding: 5px 12px; border-radius: 10px;
@@ -1778,11 +1791,11 @@ body { font-size: 14px !important; }
 <div class="planning-toolbar" id="planningToolbarTop">
   <span class="toolbar-label">Planning Window</span>
   <div class="horizon-group">
+    <div class="horizon-btn" data-w="0" onclick="setHorizon(0)" title="No forecast — open orders vs on-hand only (today)">0</div>
     <div class="horizon-btn active" data-w="1" onclick="setHorizon(1)" title="1 week — shift-level planning">1W</div>
     <div class="horizon-btn" data-w="2" onclick="setHorizon(2)" title="2 weeks — fortnightly">2W</div>
     <div class="horizon-btn" data-w="4" onclick="setHorizon(4)" title="4 weeks — monthly">4W</div>
     <div class="horizon-btn" data-w="8" onclick="setHorizon(8)" title="8 weeks — bi-monthly">8W</div>
-    <div class="horizon-btn" data-w="13" onclick="setHorizon(13)" title="13 weeks — quarterly">13W</div>
   </div>
   <!-- Working forecast-window picker (moved up from the hidden in-list toolbar
        so it actually opens). Pick a start date on the calendar; the end date is
@@ -1954,11 +1967,11 @@ body { font-size: 14px !important; }
     <!-- <div class="toolbar dup-hidden">
       <span class="toolbar-label">Planning Window</span>
       <div class="horizon-group">
+        <div class="horizon-btn" data-w="0" onclick="setHorizon(0)" title="No forecast — open orders vs on-hand only (today)">0</div>
         <div class="horizon-btn" data-w="1" onclick="setHorizon(1)" title="1 week — shift-level planning">1W</div>
         <div class="horizon-btn" data-w="2" onclick="setHorizon(2)" title="2 weeks — fortnightly">2W</div>
         <div class="horizon-btn active" data-w="4" onclick="setHorizon(4)" title="4 weeks — monthly">4W</div>
         <div class="horizon-btn" data-w="8" onclick="setHorizon(8)" title="8 weeks — bi-monthly">8W</div>
-        <div class="horizon-btn" data-w="13" onclick="setHorizon(13)" title="13 weeks — quarterly">13W</div>
       </div>
        Forecast-window picker moved to the always-visible top planning toolbar. 
       <div class="tier-filter">
@@ -2345,7 +2358,8 @@ function toggleAnalystMode() {
 const SORT_ACCESSORS = {
   sku:       r => (r.sku||'').toLowerCase(),
   status:    r => ({red:0, yellow:1, green:2}[r.urgency] ?? 3),
-  gap_pct:   r => Math.abs(r.gap_pct||0),
+  // p=0 sorts the "gap_pct" column by absolute GAP TONNES; other horizons by %
+  gap_pct:   r => (STATE.horizon === 0 ? Math.abs(r.gap||0) : Math.abs(r.gap_pct||0)),
   grade:     r => ({Excellent:0, Good:1, Fair:2, Poor:3, Unreliable:4}[normalizeGrade(r.grade)] ?? 5),
   wape:      r => (r.wape ?? Infinity),
   on_hand:   r => (r.on_hand||0),
@@ -2425,8 +2439,8 @@ function renderTable() {
               <th class="col-orders sortable ${STATE.sort.col==='orders'?'sort-'+STATE.sort.dir:''}" onclick="setSort('orders')" title="Committed open-order weight (tons) from NETPET">Open Orders ⇅</th>
               <th class="col-num analyst-col sortable ${STATE.sort.col==='on_hand'?'sort-'+STATE.sort.dir:''}" style="text-align:right" onclick="setSort('on_hand')">On Hand ⇅</th>
               <th class="col-num analyst-col sortable ${STATE.sort.col==='available'?'sort-'+STATE.sort.dir:''}" style="text-align:right" onclick="setSort('available')">Available ⇅</th>
-              <th class="col-num analyst-col sortable ${STATE.sort.col==='forecast'?'sort-'+STATE.sort.dir:''}" style="text-align:right" onclick="setSort('forecast')">Forecast ⇅</th>
-              <th class="col-gap analyst-col sortable ${STATE.sort.col==='gap_pct'?'sort-'+STATE.sort.dir:''}" onclick="setSort('gap_pct')">Gap %</th>
+              <th class="col-num analyst-col sortable ${STATE.sort.col==='forecast'?'sort-'+STATE.sort.dir:''}" style="text-align:right" onclick="setSort('forecast')">${STATE.horizon===0?'<span style="color:var(--muted2)">Forecast</span>':'Forecast ⇅'}</th>
+              <th class="col-gap analyst-col sortable ${STATE.sort.col==='gap_pct'?'sort-'+STATE.sort.dir:''}" onclick="setSort('gap_pct')">${STATE.horizon===0?'Gap (t) ⇅':'Gap % ⇅'}</th>
               <th class="col-wape analyst-col sortable ${STATE.sort.col==='wape'?'sort-'+STATE.sort.dir:''}" onclick="setSort('wape')">WAPE ⇅</th>
               <th class="col-model analyst-col sortable ${STATE.sort.col==='model'?'sort-'+STATE.sort.dir:''}" onclick="setSort('model')">Model ⇅</th>
             </tr></thead>
@@ -2453,12 +2467,22 @@ function renderRow(r) {
   const needVal  = gap > 0 ? `+${fmt(gap)}t` : gap < 0 ? `${fmt(gap)}t surplus` : '—';
   const needClr  = urgency==='red' ? 'red' : urgency==='yellow' ? 'yellow' : 'green';
 
+  const isP0     = (STATE.horizon === 0) || r.forecast_hidden === true;
   const grade    = normalizeGrade(r.grade);
   const isWms    = STATE.wmsSkus.has(r.sku);
-  const gradeEl  = grade
-    ? `<span class="conf-grade ${grade}">${GRADE_META[grade]?.icon||''} ${grade}</span>
-       <span class="conf-sub">WAPE ${r.wape?.toFixed(1)}%</span>`
-    : `<span style="color:var(--muted2);font-size:11px">—</span>`;
+
+  // Gap-alignment: NF (non-forecastable manifest SKU) and NEW (not in manifest)
+  const badges = [];
+  if (r.is_new) badges.push('<span class="sku-badge new" title="New SKU: has open orders, not in forecast manifest">NEW</span>');
+  if (r.is_nf)  badges.push('<span class="sku-badge nf" title="Non-forecastable at this horizon">NF</span>');
+  const badgeHtml = badges.join('');
+
+  const gradeEl  = isP0
+    ? `<span style="color:var(--muted2);font-size:11px">— no forecast</span>`
+    : (grade
+       ? `<span class="conf-grade ${grade}">${GRADE_META[grade]?.icon||''} ${grade}</span>
+          <span class="conf-sub">WAPE ${r.wape?.toFixed(1)}%</span>`
+       : `<span style="color:var(--muted2);font-size:11px">—</span>`);
 
   const gapPct   = r.gap_pct || 0;
   const barW     = Math.min(Math.abs(gapPct), 100);
@@ -2466,9 +2490,28 @@ function renderRow(r) {
   const modelCls = ['arima','sarima','ets'].includes(r.best_model) ? r.best_model : '';
   const selected = STATE.selectedSku===r.sku ? ' selected' : '';
 
+  // At p=0, hide the forecast + WAPE + model columns' numeric values.
+  const forecastCell = isP0
+    ? `<td class="col-num mono analyst-col" style="text-align:right;color:var(--muted2)">—</td>`
+    : `<td class="col-num mono analyst-col" style="text-align:right"><strong>${fmt(r.forecast_total)}</strong></td>`;
+  const gapCell = isP0
+    ? `<td class="col-gap analyst-col"><span class="gap-pct-txt ${urgency}" title="Gap (tonnes)">${gap>0?'+':''}${fmt(gap)}t</span></td>`
+    : `<td class="col-gap analyst-col">
+         <div class="gap-bar-row">
+           <div class="gap-track"><div class="gap-fill ${urgency}" style="width:${barW}%"></div></div>
+           <span class="gap-pct-txt ${urgency}">${gapPct>0?'+':''}${gapPct.toFixed(1)}%</span>
+         </div>
+       </td>`;
+  const wapeCell = isP0
+    ? `<td class="col-wape analyst-col"><span style="color:var(--muted2)">—</span></td>`
+    : `<td class="col-wape analyst-col"><span class="wape-badge ${wapeClass}">${r.wape!=null ? r.wape.toFixed(1)+'%' : '—'}</span></td>`;
+  const modelCell = isP0
+    ? `<td class="col-model analyst-col"><span style="color:var(--muted2)">—</span></td>`
+    : `<td class="col-model analyst-col"><span class="model-tag ${modelCls}">${r.best_model||'—'}</span></td>`;
+
   return `<tr class="sku-row${selected}" data-sku="${r.sku}" onclick="selectSku('${r.sku}')">
     <td class="col-sku">
-      <div class="sku-cell-name">${r.sku}</div>
+      <div class="sku-cell-name">${r.sku} ${badgeHtml}</div>
       <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
         <div class="sku-cell-desc" title="${r.description||''}">${r.description||''}</div>
         ${isWms ? `<span class="wms-tag">ASRS</span>` : ''}
@@ -2478,22 +2521,17 @@ function renderRow(r) {
     <td class="col-need">
       <div class="need-cell">
         <span class="need-val ${needClr}">${needVal}</span>
-        <span class="need-sub">vs ${fmt(r.available)}t available</span>
+        <span class="need-sub">vs ${fmt(r.on_hand)}t on-hand</span>
       </div>
     </td>
     <td class="col-conf"><div class="conf-cell">${gradeEl}</div></td>
     <td class="col-orders">${(() => { const a = ooAgg(r.sku); return a && a.n_orders ? `<div class="oo-cell"><span class="oo-cell-w">${fmt(a.weight_ton_total)}t</span><span class="oo-cell-sub">${a.n_orders} order${a.n_orders!==1?'s':''}</span></div>` : `<span class="oo-cell-none">—</span>`; })()}</td>
     <td class="col-num mono analyst-col" style="text-align:right">${fmt(r.on_hand)}</td>
-    <td class="col-num mono analyst-col" style="text-align:right">${fmt(r.available)}</td>
-    <td class="col-num mono analyst-col" style="text-align:right"><strong>${fmt(r.forecast_total)}</strong></td>
-    <td class="col-gap analyst-col">
-      <div class="gap-bar-row">
-        <div class="gap-track"><div class="gap-fill ${urgency}" style="width:${barW}%"></div></div>
-        <span class="gap-pct-txt ${urgency}">${gapPct>0?'+':''}${gapPct.toFixed(1)}%</span>
-      </div>
-    </td>
-    <td class="col-wape analyst-col"><span class="wape-badge ${wapeClass}">${r.wape!=null ? r.wape.toFixed(1)+'%' : '—'}</span></td>
-    <td class="col-model analyst-col"><span class="model-tag ${modelCls}">${r.best_model||'—'}</span></td>
+    <td class="col-num mono analyst-col" style="text-align:right">${fmt(r.on_hand)}</td>
+    ${forecastCell}
+    ${gapCell}
+    ${wapeCell}
+    ${modelCell}
   </tr>`;
 }
 
@@ -2549,12 +2587,16 @@ function renderCapsules(d, effH) {
   [['2D',2],['3D',3]].forEach(([lbl,k]) => {
     if (daily[k]) caps.push({key:lbl, lbl, extra:false});
   });
-  [1,2,4].forEach(h => { if (d.forecasts[h]) caps.push({key:h, lbl:`${h}W`, extra:false}); });
+  // Always offer the p=0 "today" capsule so Bruno can jump to the No-Forecast view.
+  caps.push({key:0, lbl:'0', extra:false});
+  [1,2,4,8].forEach(h => { if (d.forecasts[h]) caps.push({key:h, lbl:`${h}W`, extra:false}); });
   const extras = new Set();
   [d.best_horizon, d.priority_horizon].forEach(ref => {
     if (!ref) return;
-    const w = {7:1,14:2,28:4,56:8,91:13}[ref.horizon_days];
-    if (w && ![1,2,4].includes(w) && d.forecasts[w]) extras.add(w);
+    // 13W hidden from the UI (kept in DB); best/priority refs that point at 13W
+    // are not surfaced as a capsule.
+    const w = {7:1,14:2,28:4,56:8}[ref.horizon_days];
+    if (w && ![1,2,4,8].includes(w) && d.forecasts[w]) extras.add(w);
   });
   extras.forEach(w => caps.push({key:w, lbl:`${w}W ★`, extra:true}));
   // NOTE — using a dedicated class .dh-hz-cap so the active state can be styled
@@ -2577,22 +2619,28 @@ function renderDetail(d) {
   STATE.detailData = d;
 
   const effH   = STATE.detailHorizon ?? STATE.horizon;
+  const isP0   = (effH === 0);
   const isDaily= effH === '2D' || effH === '3D';
-  const hLbl   = isDaily ? effH : `${effH}W`;
+  const hLbl   = isDaily ? effH : (isP0 ? 'Today (p=0)' : `${effH}W`);
   const fc4    = isDaily ? (d.daily_forecasts?.[effH==='2D'?2:3] || {})
-                         : (d.forecasts[effH] || d.forecasts[4] || {});
-  // const avail  = d.inventory.available;
-  // const fcTot  = fc4.forecast_total || 0;
-  // const gap4   = fcTot - avail;
-  // const gap4p  = fcTot > 0 ? (gap4/fcTot*100) : 0;
-  const avail  = d.inventory.available;
-  const oo     = d.inventory.open_order_tons || 0;      // pending open-order tonnes (NETPET)
-  const fcTot  = fc4.forecast_total || 0;
+                         : (isP0 ? {} : (d.forecasts[effH] || d.forecasts[4] || {}));
+  const avail  = d.inventory.on_hand;                   // == available now (allocated dropped)
+  // Per-horizon capped open orders (gap-alignment). Falls back to the uncapped
+  // total if the backend hasn't surfaced the map yet.
+  const ooMap  = d.open_order_tons_by_horizon || {};
+  const ooTotal= d.inventory.open_order_tons || 0;
+  const oo     = (effH in ooMap) ? (ooMap[effH] || 0)
+               : (isP0 ? (ooMap[0] || ooTotal) : ooTotal);
+  const fcTot  = isP0 ? 0 : (fc4.forecast_total || 0);
   const gap4   = fcTot + oo - avail;                    // demand = forecast + open orders
   const gap4p  = (fcTot + oo) > 0 ? (gap4/(fcTot + oo)*100) : 0;
   let urgCls   = 'ok';
-  if (gap4p > 50) urgCls = 'urgent';
-  else if (gap4p > 20) urgCls = 'watch';
+  if (isP0) {
+    urgCls = gap4 > 0 ? 'urgent' : 'ok';
+  } else {
+    if (gap4p > 50) urgCls = 'urgent';
+    else if (gap4p > 20) urgCls = 'watch';
+  }
   if (isDaily && fc4.gated) urgCls = 'watch';
 
   const tierLbl = { A:'Fast Mover', B:'Medium Mover', C:'Slow Mover' }[d.velocity?.tier] || '';
@@ -2609,33 +2657,52 @@ function renderDetail(d) {
   if (isDaily && fc4.gated) {
     heroHtml = `Forecast reliability at ${hLbl} is below the usable threshold for this SKU.
       <span class="hero-produce">→ No number shown, use a weekly window instead</span>`;
-  // } else if (gap4 > 0) {
-  //   heroHtml = `You have <strong>${fmt(avail)}t</strong> available. The ${hLbl} forecast is <strong>${fmt(fcTot)}t</strong>.
-  //     <span class="hero-produce">→ Produce ~${fmt(gap4)}t</span>`;
+  } else if (isP0) {
+    // p=0 (No Forecast view) — open orders due by today vs on-hand
+    if (gap4 > 0) {
+      heroHtml = `You have <strong>${fmt(avail)}t</strong> on-hand against <strong>${fmt(oo)}t</strong> of open orders due by today.
+        <span class="hero-produce">→ Produce ~${fmt(gap4)}t</span>`;
+    } else if (gap4 < 0) {
+      heroHtml = `You have <strong>${fmt(avail)}t</strong> on-hand against <strong>${fmt(oo)}t</strong> of open orders due by today.
+        <span class="hero-produce">→ Surplus of ~${fmt(Math.abs(gap4))}t, no action needed</span>`;
+    } else {
+      heroHtml = `On-hand stock matches the <strong>${fmt(oo)}t</strong> of open orders due by today.
+        <span class="hero-produce">→ No production needed</span>`;
+    }
   } else if (gap4 > 0) {
-  heroHtml = `You have <strong>${fmt(avail)}t</strong> available against ${hLbl} demand of <strong>${fmt(fcTot + oo)}t</strong> (${fmt(fcTot)}t forecast + ${fmt(oo)}t open orders).
+  heroHtml = `You have <strong>${fmt(avail)}t</strong> on-hand against ${hLbl} demand of <strong>${fmt(fcTot + oo)}t</strong> (${fmt(fcTot)}t forecast + ${fmt(oo)}t open orders).
     <span class="hero-produce">→ Produce ~${fmt(gap4)}t</span>`;
-  // } else if (gap4 < 0) {
-  //   heroHtml = `You have <strong>${fmt(avail)}t</strong> available against a forecast of <strong>${fmt(fcTot)}t</strong>.
-  //     <span class="hero-produce">→ Surplus of ~${fmt(Math.abs(gap4))}t, no action needed</span>`;
-  // }
   } else if (gap4 < 0) {
-  heroHtml = `You have <strong>${fmt(avail)}t</strong> available against ${hLbl} demand of <strong>${fmt(fcTot + oo)}t</strong> (${fmt(fcTot)}t forecast + ${fmt(oo)}t open orders).
+  heroHtml = `You have <strong>${fmt(avail)}t</strong> on-hand against ${hLbl} demand of <strong>${fmt(fcTot + oo)}t</strong> (${fmt(fcTot)}t forecast + ${fmt(oo)}t open orders).
     <span class="hero-produce">→ Surplus of ~${fmt(Math.abs(gap4))}t, no action needed</span>`;
 }else {
-    heroHtml = `Available stock matches the ${hLbl} forecast of <strong>${fmt(fcTot)}t</strong>.
+    heroHtml = `On-hand stock matches the ${hLbl} forecast of <strong>${fmt(fcTot)}t</strong>.
       <span class="hero-produce">→ No production needed</span>`;
   }
 
   const conv = d.conversions || {};
   const toSacks  = t => conv.sack_weight_kg ? fmt(t*1000/conv.sack_weight_kg) : '<span style="color:var(--muted2)">n/a</span>';
   const toPallets= t => conv.kg_per_pallet_wes ? fmt(t*1000/conv.kg_per_pallet_wes) : '<span style="color:var(--muted2)">n/a</span>';
-  const hRows = [1,2,4,8,13].map(h => {
+  // Build horizon rows: 0 (p=0 view), then 1W/2W/4W/8W. 13W kept in DB,
+  // hidden from the UI per gap-alignment Oct 2026.
+  const hRows = [0,1,2,4,8].map(h => {
+    const ooH = (h in ooMap) ? (ooMap[h] || 0) : (h === 0 ? ooTotal : ooTotal);
+    if (h === 0) {
+      const g = ooH - avail;
+      const activeCls = (!isDaily && h === effH) ? ' h-active' : '';
+      return `<tr class="${activeCls}" style="cursor:pointer" onclick="setDetailHorizon(0)">
+        <td>0 · today</td>
+        <td style="color:var(--muted2)">—</td>
+        <td class="mono" style="color:var(--muted2)">—</td>
+        <td class="mono" style="color:var(--muted2)">—</td>
+        <td class="h-gap ${g>0?'pos':'neg'}">${g>0?'+':''}${fmt(g)}t</td>
+        <td style="color:var(--muted2)">—</td>
+      </tr>`;
+    }
     const f = d.forecasts[h]; if (!f) return '';
-    //const g = f.forecast_total - avail;
-    const g = f.forecast_total + oo - avail;
+    const g = (f.forecast_total || 0) + ooH - avail;
     return `<tr class="${(!isDaily && h===effH)?' h-active':''}" style="cursor:pointer" onclick="setDetailHorizon(${h})">
-      <td>${h}W${h===2?' · 2wk':h===4?' · 1M':h===8?' · 2M':h===13?' · 3M':''}</td>
+      <td>${h}W${h===2?' · 2wk':h===4?' · 1M':h===8?' · 2M':''}</td>
       <td>${fmt(f.forecast_total)}t</td>
       <td class="mono">${toSacks(f.forecast_total)}</td>
       <td class="mono">${toPallets(f.forecast_total)}</td>

@@ -34,13 +34,16 @@ DATA_PATH = os.environ.get("PETMAXI_DATA_PATH", os.path.join(_HERE, "data", "ven
 OPEN_ORDERS_FIXTURE = os.environ.get(
     "PETMAXI_ORDERS_FIXTURE", os.path.join(_HERE, "data", "open_orders_fixture.json")
 )
-TEMPLATE_NAME = "dashboard_v7_ab_api_final.html"#dashboard_v7_ab_api.html
-LANDING_TEMPLATE = "landing_v7_ab_api.html"
-PLANNER_TEMPLATE = "dashboard_v8_planner_alt.html"
+TEMPLATE_NAME = "dashboard_v8_ab_api.html"
+LANDING_TEMPLATE = "landing_v8_ab_api.html"
+PLANNER_TEMPLATE = "dashboard_v8_planner.html"
 
 DEFAULT_HORIZON_DAYS = 28
 ATTENTION_TOP_N = 5
-HORIZON_LABELS = {7: "1W", 14: "2W", 28: "4W", 56: "8W", 91: "13W"}
+# 13W kept in DB but hidden from the UI horizon selector (gap-alignment Oct 2026).
+HORIZON_LABELS = {0: "0", 7: "1W", 14: "2W", 28: "4W", 56: "8W", 91: "13W"}
+UI_HORIZON_WEEKS = [0, 1, 2, 4, 8]  # buttons shown on the forecast dashboard
+HORIZON_WEEKS_TO_DAYS = {0: 0, 1: 7, 2: 14, 4: 28, 8: 56, 13: 91}
 DAILY_HORIZON_LABELS = {2: "2D", 3: "3D"}
 PRIORITY_TOLERANCE_PTS = 3.0
 
@@ -439,94 +442,238 @@ def api_skus():
 
 ATTENTION_HORIZON_DAYS = 7
 
+# ---------------------------------------------------------------------------
+# Gap-alignment rework (Oct 2026). Reference: PetMaxi_Gap_Calculation_Alignment
+#
+# Horizons on the UI: 0, 1W, 2W, 4W, 8W. 13W kept in DB, hidden on UI.
+# For each (SKU, horizon_days h):
+#     oo_tons_h    = open_order_gap_tons_all_skus_capped(basis, h)
+#                    (orders with delivery_date <= today+h, or NULL date;
+#                     prorated to tonnes against the chosen qty basis)
+#     fcast_h      = sku_forecasts.forecast_total for that horizon
+#                    (0 when h == 0, since there is no forecast at p=0)
+#     on_hand      = inventory on-hand tonnes (NETPET; no allocated subtraction)
+#     gap          = fcast_h + oo_tons_h - on_hand
+#     gap_pct      = gap / (fcast_h + oo_tons_h) * 100   (0 if denom <= 0)
+#
+# Universe:
+#   p = 0  -> union of (SKUs with any open order <= today). Forecast hidden,
+#            sort by absolute gap tonnes desc. All SKUs eligible (NF/NEW
+#            badges where applicable). ABC split preserved.
+#   p >= 1W -> forecastable SKUs AND non-forecastable manifest SKUs with
+#              oo_tons_h > 0 (NF badge), plus new-order SKUs that have
+#              oo_tons_h > 0 but are NOT in the manifest (NEW badge, tier C).
+#   Attention bucket: gap_pct > 20% (h>=1W); gap > 0 tonnes (h=0).
+# ---------------------------------------------------------------------------
+
 @app.route("/api/attention")
 def api_attention():
     if not _db_exists():
         return jsonify({"ready": False, "message": "No batch run yet."})
     horizon_weeks = int(request.args.get("horizon", 1))
-    horizon_days = {1: 7, 2: 14, 4: 28, 8: 56, 13: 91}.get(horizon_weeks, horizon_weeks * 7)
+    horizon_days = HORIZON_WEEKS_TO_DAYS.get(horizon_weeks, horizon_weeks * 7)
     top_n = int(request.args.get("top_n", 999))
     tier_filter = request.args.get("tier", "").upper()
+
     conn = _db()
-    has_inventory = _table_exists(conn, "sku_inventory")
-    manifest = pd.read_sql("SELECT * FROM sku_manifest WHERE is_forecastable = 1", conn)
-    forecasts_h = pd.read_sql(
-        "SELECT * FROM sku_forecasts WHERE horizon_days = ?", conn, params=(horizon_days,)
+    manifest_all = pd.read_sql("SELECT * FROM sku_manifest", conn)
+    forecasts_h = (
+        pd.read_sql("SELECT * FROM sku_forecasts WHERE horizon_days = ?",
+                    conn, params=(horizon_days,))
+        if horizon_days > 0 else pd.DataFrame()
     )
-    all_forecasts = pd.read_sql("SELECT sku, horizon_days, wape, best_model FROM sku_forecasts", conn)
-    inventory = pd.read_sql("SELECT * FROM sku_inventory", conn) if has_inventory else pd.DataFrame()
+    all_forecasts = pd.read_sql(
+        "SELECT sku, horizon_days, wape, best_model FROM sku_forecasts", conn
+    )
     inv_map, inv_source = _resolve_inventory(conn)
     conn.close()
-    oo_map = _safe_oo_map()
+
+    # Capped open orders for this horizon (gap-alignment rework)
+    try:
+        oo_map = oo_store.open_order_gap_tons_all_skus_capped(
+            OPEN_ORDER_GAP_BASIS, horizon_days
+        )
+    except Exception as e:
+        print(f"WARN: capped open-orders map failed: {e}")
+        oo_map = {}
+
+    # Lookup helpers
+    manifest_by_sku = {str(r["sku"]): r for _, r in manifest_all.iterrows()}
+    forecast_by_sku = (
+        {str(r["sku"]): r for _, r in forecasts_h.iterrows()}
+        if not forecasts_h.empty else {}
+    )
+
+    # --- Build the SKU universe for this horizon ---------------------------
+    universe = set()
+    if horizon_weeks == 0:
+        # p = 0: every SKU that has any open order on/before today.
+        universe = set(oo_map.keys())
+    else:
+        # p >= 1W: forecastable manifest SKUs + non-forecastable manifest
+        # SKUs with open orders > 0 + new SKUs (not in manifest) with
+        # open orders > 0.
+        universe |= {s for s, r in manifest_by_sku.items() if bool(r.get("is_forecastable"))}
+        universe |= {s for s, t in oo_map.items() if (t or 0) > 0}
+
     if tier_filter in ("A", "B", "C"):
-        manifest = manifest[manifest["velocity_tier"] == tier_filter]
-    merged = manifest.merge(forecasts_h, on="sku", how="left", suffixes=("", "_f"))
-    if not inventory.empty:
-        merged = merged.merge(inventory, on="sku", how="left", suffixes=("", "_i"))
+        # Only applied to SKUs that are in the manifest. New SKUs are tier C
+        # by default — see tier resolution below.
+        universe = {
+            s for s in universe
+            if (manifest_by_sku.get(s, {}).get("velocity_tier") or "C") == tier_filter
+            or (s not in manifest_by_sku and tier_filter == "C")
+        }
+
     by_tier = {"A": {"attention": [], "sufficient": []},
                "B": {"attention": [], "sufficient": []},
                "C": {"attention": [], "sufficient": []}}
-    for _, r in merged.iterrows():
-        sku_str = str(r["sku"])
-        forecast_total = r.get("forecast_total")
-        source_tag = r.get("source_tag") if has_inventory else None
-        forecast_total = None if pd.isna(forecast_total) else forecast_total
-        source_tag = None if pd.isna(source_tag) else source_tag
+
+    for sku_str in universe:
+        m = manifest_by_sku.get(sku_str)
+        is_new_sku = m is None
+        is_forecastable = bool(m.get("is_forecastable")) if m is not None else False
+
+        f = forecast_by_sku.get(sku_str)
+        if horizon_weeks == 0 or f is None:
+            forecast_total = 0.0 if horizon_weeks == 0 else None
+            if f is not None:
+                ft = f.get("forecast_total")
+                forecast_total = None if pd.isna(ft) else float(ft)
+        else:
+            ft = f.get("forecast_total")
+            forecast_total = None if pd.isna(ft) else float(ft)
+
+        # Inventory
         if inv_source == "netpet_api":
-            available = inv_map.get(sku_str, 0.0)
-            source_tag = source_tag or "NETPET"
+            available = float(inv_map.get(sku_str, 0.0))
         elif inv_source == "sku_inventory_table":
             available = inv_map.get(sku_str)
+            available = float(available) if available is not None else None
         else:
             available = None
-        on_hand = available
-        oo_tons = round(oo_map.get(sku_str, 0.0), 3)
-        demand_total = (forecast_total + oo_tons) if forecast_total is not None else None
-        if forecast_total is not None and available is not None:
-            gap = round(forecast_total + oo_tons - available, 3)
-            denom = demand_total if GAP_PCT_BASE == "demand" else forecast_total
+        on_hand = available if available is not None else 0.0
+
+        oo_tons = round(float(oo_map.get(sku_str, 0.0)), 3)
+
+        # --- Gap calc (additive, no allocated subtraction) -----------------
+        if horizon_weeks == 0:
+            # p = 0: forecast hidden, gap on open orders only
+            gap = round(oo_tons - on_hand, 3)
+            denom = oo_tons
             gap_pct = round((gap / denom * 100) if denom and denom > 0 else 0, 1)
-            threshold = 0 if horizon_weeks == 1 else 20
+            bucket = "attention" if gap > 0 else "sufficient"
+            urgency = "red" if gap > 0 and (gap_pct > 50 or denom == 0) else (
+                "yellow" if gap > 0 else "green"
+            )
+            demand_total = oo_tons
+        else:
+            fcast_for_gap = forecast_total if forecast_total is not None else 0.0
+            demand_total = fcast_for_gap + oo_tons
+            gap = round(fcast_for_gap + oo_tons - on_hand, 3)
+            gap_pct = round(
+                (gap / demand_total * 100) if demand_total and demand_total > 0 else 0, 1
+            )
+            threshold = 20
             urgency = "red" if gap_pct > 50 else ("yellow" if gap_pct > threshold else "green")
             bucket = "attention" if gap_pct > threshold else "sufficient"
-        else:
-            gap, gap_pct, urgency, bucket = 0, 0, "green", "sufficient"
-        sku_all = all_forecasts[(all_forecasts["sku"] == r["sku"]) & all_forecasts["wape"].notna()]
+
+        # Best-horizon reference (across all horizons in DB)
+        sku_all = all_forecasts[(all_forecasts["sku"] == sku_str) & all_forecasts["wape"].notna()]
         best_row = sku_all.loc[sku_all["wape"].idxmin()] if not sku_all.empty else None
+
+        # Tier resolution: manifest tier if present, else C for new SKUs
+        tier = (m.get("velocity_tier") if m is not None else None) or "C"
+        if tier not in by_tier:
+            tier = "C"
+
+        # Grade / NF-NEW flags
+        if is_new_sku:
+            grade = "New"
+        elif not is_forecastable:
+            grade = "Insufficient History"
+        elif horizon_weeks == 0:
+            grade = "No Forecast"
+        elif f is not None and f.get("grade"):
+            grade = f.get("grade")
+        else:
+            grade = "No Model"
+
+        is_nf = (not is_new_sku) and (
+            (not is_forecastable)
+            or (horizon_weeks > 0 and (f is None or forecast_total is None))
+        )
+
+        wape_val = None
+        best_model = None
+        zero_wape_override = False
+        data_gap_periods = None
+        if f is not None:
+            w = f.get("wape")
+            wape_val = round(float(w), 2) if (w is not None and not pd.isna(w)) else None
+            best_model = f.get("best_model")
+            zero_wape_override = bool(f.get("zero_wape_override")) if "zero_wape_override" in f else False
+            dgp = f.get("data_gap_periods")
+            data_gap_periods = int(dgp) if (dgp is not None and not pd.isna(dgp)) else None
+
         card = {
-            "sku": r["sku"], "description": r.get("description"), "family": r.get("family"),
-            "velocity_tier": r.get("velocity_tier"), "best_model": r.get("best_model"),
-            "wape": round(r["wape"], 2) if pd.notna(r.get("wape")) else None,
-            "grade": r.get("grade") or "No Model",
-            "forecast_total": round(forecast_total, 2) if forecast_total is not None else 0,
-            "open_order_tons": oo_tons, "open_order_basis": OPEN_ORDER_GAP_BASIS,
-            "demand_total": round(demand_total, 2) if demand_total is not None else 0,
-            "on_hand": round(on_hand, 2) if on_hand is not None else 0,
-            "available": round(available, 2) if available is not None else 0,
-            "source_tag": source_tag,
-            "gap": gap, "gap_pct": gap_pct, "urgency": urgency,
+            "sku": sku_str,
+            "description": (m.get("description") if m is not None else None),
+            "family": (m.get("family") if m is not None else None),
+            "velocity_tier": tier,
+            "best_model": best_model,
+            "wape": wape_val,
+            "grade": grade,
+            "is_nf": is_nf,
+            "is_new": is_new_sku,
+            "forecast_total": round(forecast_total, 2) if forecast_total is not None else None,
+            "forecast_hidden": (horizon_weeks == 0),
+            "open_order_tons": oo_tons,
+            "open_order_basis": OPEN_ORDER_GAP_BASIS,
+            "demand_total": round(demand_total, 2),
+            "on_hand": round(on_hand, 2),
+            "available": round(on_hand, 2),  # == on_hand now (no allocated)
+            "source_tag": "NETPET" if inv_source == "netpet_api" else None,
+            "gap": gap,
+            "gap_pct": gap_pct,
+            "urgency": urgency,
             "horizon_weeks": horizon_weeks,
             "inventory_covered": available is not None,
             "best_horizon_days": int(best_row["horizon_days"]) if best_row is not None else None,
             "best_horizon_label": HORIZON_LABELS.get(int(best_row["horizon_days"])) if best_row is not None else None,
-            "best_wape": round(best_row["wape"], 2) if best_row is not None else None,
-            "zero_wape_override": bool(r.get("zero_wape_override")),
-            "data_gap_periods": int(r["data_gap_periods"]) if pd.notna(r.get("data_gap_periods")) else None,
+            "best_wape": round(float(best_row["wape"]), 2) if best_row is not None else None,
+            "zero_wape_override": zero_wape_override,
+            "data_gap_periods": data_gap_periods,
         }
-        tier = card["velocity_tier"] if card["velocity_tier"] in by_tier else "C"
         by_tier[tier][bucket].append(card)
+
     tier_labels = {"A": "Fast Movers", "B": "Medium Movers", "C": "Slow Movers"}
     result = {}
     for t in ("A", "B", "C"):
-        attn = sorted(by_tier[t]["attention"], key=lambda x: -(x["gap"] or 0))
-        suff = sorted(by_tier[t]["sufficient"], key=lambda x: (x["gap"] or 0))
-        result[t] = {"label": tier_labels[t], "attention": attn[:top_n], "attention_total": len(attn),
+        if horizon_weeks == 0:
+            # p = 0: sort attention by absolute gap tonnes desc (user request)
+            attn = sorted(by_tier[t]["attention"], key=lambda x: -(x["gap"] or 0))
+            suff = sorted(by_tier[t]["sufficient"], key=lambda x: (x["gap"] or 0))
+        else:
+            # Other horizons: sort by gap_pct desc inside attention, asc in sufficient
+            attn = sorted(by_tier[t]["attention"], key=lambda x: -(x["gap_pct"] or 0))
+            suff = sorted(by_tier[t]["sufficient"], key=lambda x: (x["gap_pct"] or 0))
+        result[t] = {"label": tier_labels[t],
+                     "attention": attn[:top_n], "attention_total": len(attn),
                      "sufficient": suff[:top_n], "sufficient_total": len(suff)}
-    return jsonify({"ready": True, "horizon_weeks": horizon_weeks,
-                    "inventory_available": inv_source is not None,
-                    "inventory_source": inv_source,
-                    "open_order_basis": OPEN_ORDER_GAP_BASIS,
-                    "tiers": result})
+
+    return jsonify({
+        "ready": True,
+        "horizon_weeks": horizon_weeks,
+        "horizon_days": horizon_days,
+        "ui_horizons": UI_HORIZON_WEEKS,
+        "forecast_hidden": (horizon_weeks == 0),
+        "sort_mode": ("gap_tons" if horizon_weeks == 0 else "gap_pct"),
+        "inventory_available": inv_source is not None,
+        "inventory_source": inv_source,
+        "open_order_basis": OPEN_ORDER_GAP_BASIS,
+        "tiers": result,
+    })
 
 
 @app.route("/api/sku/<sku_id>")
@@ -587,23 +734,53 @@ def api_sku_detail(sku_id: str):
     best = _best_horizon(valid)
     priority = _priority_horizon(valid)
     available_val, av_source = _available_for_sku(sku_id)
-    oo_tons = 0.0
+    # Uncapped total open-order tonnes (kept for backward compat / KPI card)
+    oo_tons_total = 0.0
     try:
-        oo_tons = round(oo_store.open_order_gap_tons_for_sku(sku_id, OPEN_ORDER_GAP_BASIS), 3)
+        oo_tons_total = round(
+            oo_store.open_order_gap_tons_for_sku(sku_id, OPEN_ORDER_GAP_BASIS), 3
+        )
     except Exception as e:
         print(f"WARN: open-orders gap for {sku_id} failed: {e}")
     inv_val = round(available_val, 2) if available_val is not None else 0
     inventory = {
-        "on_hand": inv_val, "allocated": 0, "available": inv_val,
+        "on_hand": inv_val,
+        "available": inv_val,  # == on_hand (allocated dropped Oct 2026)
         "source_tag": "NETPET" if av_source == "netpet_api" else None,
         "covered": available_val is not None,
-        "open_order_tons": oo_tons, "open_order_basis": OPEN_ORDER_GAP_BASIS,
+        "open_order_tons": oo_tons_total,
+        "open_order_basis": OPEN_ORDER_GAP_BASIS,
     }
-    avail_for_gap = available_val if available_val is not None else inventory["available"]
+    on_hand_for_gap = available_val if available_val is not None else 0.0
+
+    # Per-horizon gaps now use HORIZON-CAPPED open orders (gap-alignment).
     gaps = {}
-    for h, fc in forecasts.items():
-        if fc["forecast_total"] is not None:
-            gaps[h] = round(fc["forecast_total"] + oo_tons - avail_for_gap, 2)
+    oo_tons_by_horizon = {}
+    # p = 0: forecast hidden, gap = oo_cum_0 - on_hand
+    try:
+        oo_0 = oo_store.open_order_gap_tons_for_sku_capped(
+            sku_id, OPEN_ORDER_GAP_BASIS, 0
+        )
+    except Exception as e:
+        print(f"WARN: capped OO (h=0) for {sku_id} failed: {e}")
+        oo_0 = 0.0
+    oo_tons_by_horizon[0] = oo_0
+    gaps[0] = round(oo_0 - on_hand_for_gap, 2)
+    # p = 1W/2W/4W/8W (and 13W if present): fcast_h + oo_cum_h - on_hand
+    for h_weeks, fc in forecasts.items():
+        if h_weeks == 0:
+            continue
+        h_days = fc.get("horizon_days") or HORIZON_WEEKS_TO_DAYS.get(h_weeks, h_weeks * 7)
+        try:
+            oo_h = oo_store.open_order_gap_tons_for_sku_capped(
+                sku_id, OPEN_ORDER_GAP_BASIS, h_days
+            )
+        except Exception as e:
+            print(f"WARN: capped OO (h={h_days}) for {sku_id} failed: {e}")
+            oo_h = 0.0
+        oo_tons_by_horizon[h_weeks] = oo_h
+        fcast = fc["forecast_total"] if fc["forecast_total"] is not None else 0.0
+        gaps[h_weeks] = round(fcast + oo_h - on_hand_for_gap, 2)
     fg_total_for_rm = primary["forecast_total"] if primary and primary.get("forecast_total") else 0.0
     rm = _get_rm_forecast(sku_id, fg_total_for_rm)
     def _horizon_ref(h):
@@ -627,7 +804,9 @@ def api_sku_detail(sku_id: str):
         "best_horizon": _horizon_ref(best),
         "priority_horizon": _horizon_ref(priority),
         "inventory": inventory, "forecasts": forecasts, "daily_forecasts": daily,
-        "gaps": gaps, "rm_requirements": rm,
+        "gaps": gaps,
+        "open_order_tons_by_horizon": oo_tons_by_horizon,
+        "rm_requirements": rm,
     })
 
 
