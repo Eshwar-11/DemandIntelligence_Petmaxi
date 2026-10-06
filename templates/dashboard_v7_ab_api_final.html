@@ -1,0 +1,3471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PetMaxi — Demand Intelligence</title>
+<script>
+  // Apply saved theme BEFORE any CSS renders — prevents flash of wrong theme.
+  // Valid prefs: 'light' | 'dark' | 'system'. Default = system (strict OS mirror).
+  // Applied data-theme is always either 'light' or 'dark' (system is resolved here).
+  (function() {
+    try {
+      const saved = localStorage.getItem('petmaxi-theme');
+      const pref = ['light', 'dark', 'system'].includes(saved) ? saved : 'system';
+      let resolved = pref;
+      if (pref === 'system') {
+        resolved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', resolved);
+    } catch(e) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
+<link rel="stylesheet" href="{{ base_path }}/static/fonts/manrope.css">
+<link rel="stylesheet" href="{{ base_path }}/static/fonts/jetbrains.css">
+<script src="{{ base_path }}/static/chart.umd.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════
+   TOKENS — default (light), dark theme swaps via [data-theme]
+═══════════════════════════════════════════════════════ */
+:root {
+  /* Addverb: White + Red (#EE3124/#990000) + Blue hints */
+  --g900: #0a1628; --g800: #0f1d30; --g700: #990000;
+  --g600: #EE3124; --g500: #f04838; --g400: #f47068;
+  --g300: #ffffff; --g200: #e8ecf0; --g100: #f0f4f8; --g50: #f7f9fb;
+  --ink: #1a1a1a; --ink2: #333; --muted: #555; --muted2: #7a7a7a;
+  --border: #dde2e8; --border2: #eef1f4;
+  --surface: #ffffff; --surface2: #f8f9fb;
+  --bg: #f0f2f6; --bg2: #e8ecf2; --bg3: #dde2ea;
+  --red: #b83232; --red-bg: #fdf1f0; --red-border: #f2c4c0; --red-dark: #8b1a1a;
+  --yellow: #b87000; --yellow-bg: #fdf7e8; --yellow-border: #eecf7a; --yellow-dark: #7a4a00;
+  --blue: #1a5c8a; --blue-bg: #eef5fb; --blue-border: #b8d4eb;
+  /* Semantic green: NOT brand, purely for 'OK/covered/safe' states */
+  --ok: #3a8a28; --ok-light: #5cb032; --ok-bg: #eef8e3; --ok-border: #b8e0a0; --ok-dark: #2a6818;
+  --shadow-sm: 0 1px 4px rgba(15,26,7,.06);
+  --shadow: 0 2px 12px rgba(15,26,7,.08), 0 1px 3px rgba(15,26,7,.05);
+  --shadow-lg: 0 6px 28px rgba(15,26,7,.12), 0 2px 8px rgba(15,26,7,.06);
+  --shadow-modal: 0 30px 80px rgba(5,13,2,.35), 0 8px 24px rgba(5,13,2,.18);
+  --shadow-btn: 0 2px 8px rgba(15,26,7,.08), 0 1px 2px rgba(15,26,7,.04);
+  --shadow-btn-hover: 0 8px 20px rgba(15,26,7,.12), 0 2px 6px rgba(15,26,7,.06);
+  --radius: 8px; --radius-lg: 12px; --radius-sm: 5px;
+  --font: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --header-h: 54px;
+  --achieve-h: 88px;
+  --tabs-h: 110px;
+  --toolbar-h: 44px;
+}
+
+/* Dark theme overrides */
+html[data-theme="dark"] {
+  --ink:    rgba(255,255,255,.92);
+  --ink2:   rgba(255,255,255,.75);
+  --muted:  rgba(255,255,255,.78);
+  --muted2: rgba(255,255,255,.58);
+  --surface:  #121620;
+  --surface2: #161a26;
+  --bg:  #0a0e18;
+  --bg2: #0e1220;
+  --bg3: #141828;
+  --border:  rgba(255,255,255,.12);
+  --border2: rgba(255,255,255,.06);
+  --g50:  rgba(80,130,200,.08);
+  --g100: rgba(80,130,200,.12);
+  --g200: rgba(80,130,200,.20);
+  --g700: #a0c0e8;
+  --g800: #c8ddf0;
+  --red-bg:     rgba(232,80,64,.14);
+  --red-border: rgba(232,80,64,.32);
+  --red-dark:   #ff8b7f;
+  --yellow-bg:     rgba(232,184,48,.14);
+  --yellow-border: rgba(232,184,48,.32);
+  --yellow-dark:   #ffc856;
+  --blue:    #7ab8f0;
+  --blue-bg: rgba(80,152,232,.14);
+  --blue-border: rgba(80,152,232,.32);
+  --ok: #5cb032; --ok-light: #7ec855; --ok-bg: rgba(92,176,50,.12); --ok-border: rgba(92,176,50,.25); --ok-dark: #a0e080;
+  --shadow-sm: 0 1px 4px rgba(0,0,0,.4);
+  --shadow: 0 2px 12px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.2);
+  --shadow-lg: 0 6px 28px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
+  --shadow-btn: 0 2px 8px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.25);
+  --shadow-btn-hover: 0 8px 20px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
+}
+
+/* System pref is resolved to 'light' or 'dark' by JS at boot;
+   no separate palette for data-theme="system". */
+
+/* ═══════════════════════════════════════════════════════
+   BASE
+═══════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { height: 100%; }
+body {
+  min-height: 100%;
+  overflow-y: auto;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+}
+.mono { font-family: var(--mono); }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ═══════════════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════════════ */
+.header {
+  height: var(--header-h);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px;
+  background: linear-gradient(135deg, #041228 0%, #065BAA 200%);
+  color: #fff;
+  position: relative; z-index: 100;
+  border-bottom: 2px solid rgba(0,0,0,.55);
+  box-shadow: 0 2px 16px rgba(0,0,0,.35);
+}
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo-mark {
+  width: 36px; height: 36px; background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; flex-shrink: 0;
+}
+.logo-name { font-size: 16px; font-weight: 800; letter-spacing: -.2px; }
+.logo-sub  { font-size: 9px; color: var(--g300); letter-spacing: 2px; text-transform: uppercase; margin-top: 1px; }
+.header-right { display: flex; align-items: center; gap: 8px; }
+
+/* Cross-page navigation links (Landing / Forecast / Analytics / Customers) */
+.header-nav {
+  display: flex; gap: 4px;
+  margin-left: 32px;
+}
+.hn-link {
+  padding: 5px 12px; border-radius: 6px;
+  font-size: 11.5px; font-weight: 600;
+  color: rgba(255,255,255,.55);
+  text-decoration: none; letter-spacing: .3px;
+  transition: all .15s; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.hn-link:hover { color: #fff; background: rgba(255,255,255,.06); }
+.hn-link.active {
+  color: var(--g300);
+  background: rgba(26,92,138,.10);
+  border-color: rgba(26,92,138,.20);
+}
+.header-badge {
+  padding: 3px 10px; border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.18);
+  font-size: 10.5px; color: rgba(255,255,255,.75);
+  font-family: var(--mono);
+}
+.header-badge.live { border-color: var(--g400); color: var(--g300); }
+.header-badge.live::before { content: '● '; font-size: 8px; }
+
+/* Analyst toggle pill */
+.analyst-toggle {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.2);
+  cursor: pointer; transition: all .15s;
+  font-size: 10px; font-weight: 600;
+  color: rgba(255,255,255,.55); letter-spacing: .5px;
+  text-transform: uppercase; user-select: none;
+}
+.analyst-toggle:hover { border-color: var(--g400); color: var(--g300); }
+.analyst-toggle.on { border-color: var(--g400); color: var(--g300); background: rgba(26,92,138,.18); }
+.atgl-track {
+  width: 24px; height: 13px; border-radius: 7px;
+  background: rgba(255,255,255,.2); position: relative; transition: background .2s; flex-shrink: 0;
+}
+.analyst-toggle.on .atgl-track { background: var(--g400); }
+.atgl-track::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 9px; height: 9px; border-radius: 50%; background: #fff; transition: transform .2s;
+}
+.analyst-toggle.on .atgl-track::after { transform: translateX(11px); }
+
+/* Header icon buttons */
+.icon-btn {
+  width: 30px; height: 30px; border-radius: 7px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: transparent; color: rgba(255,255,255,.65);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all .15s;
+}
+.icon-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
+.icon-btn svg { width: 15px; height: 15px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.icon-btn.spinning svg { animation: spin .6s linear; }
+
+/* Theme toggle: 3-way segmented control (light / system / dark) */
+.theme-toggle {
+  display: flex; gap: 2px;
+  padding: 3px; border-radius: 20px;
+  background: rgba(0,0,0,.25);
+  border: 1px solid rgba(255,255,255,.14);
+}
+.tt-btn {
+  width: 26px; height: 22px; border-radius: 16px;
+  background: transparent; border: none;
+  color: rgba(255,255,255,.5);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .18s;
+  padding: 0;
+}
+.tt-btn:hover { color: #fff; }
+.tt-btn.active {
+  background: rgba(26,92,138,.22);
+  color: var(--g300);
+  box-shadow: 0 0 0 1px rgba(26,92,138,.35) inset;
+}
+.tt-btn svg { width: 13px; height: 13px; }
+
+/* Powered by strip */
+.poweredby-strip {
+  background: #111; text-align: center; padding: 2px 0;
+  font-size: 9px; color: rgba(255,255,255,.38);
+  letter-spacing: 1.8px; font-family: var(--mono);
+}
+.poweredby-strip b { color: var(--g300); font-weight: 700; }
+
+/* Freshness banner */
+.freshness-banner {
+  display: none; align-items: center; gap: 11px;
+  padding: 7px 20px; color: #fff; font-size: 11.5px;
+  transition: background-color .3s; font-family: var(--mono);
+}
+.freshness-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.25); flex-shrink: 0;
+}
+.freshness-label {
+  font-weight: 800; font-size: 10px;
+  letter-spacing: .6px; text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════════════
+   ACHIEVEMENT BANNER — Portfolio KPIs, prominent + stylized
+═══════════════════════════════════════════════════════ */
+.achieve-banner {
+  height: var(--achieve-h);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: stretch;
+  padding: 0 6px;
+  gap: 0;
+  box-shadow: inset 0 -2px 0 var(--g200);
+}
+.ach-section {
+  padding: 12px 18px;
+  display: flex; flex-direction: column; justify-content: center;
+  position: relative;
+  border-right: 1px solid var(--border2);
+  flex-shrink: 0; min-width: 0;
+}
+.ach-section:last-child { border-right: none; }
+.ach-eyebrow {
+  font-family: var(--mono);
+  font-size: 9px; font-weight: 700;
+  color: var(--g600); letter-spacing: 1.8px;
+  text-transform: uppercase; margin-bottom: 6px;
+}
+
+/* Readiness hero */
+.ach-readiness { min-width: 180px; }
+.ach-read-row  { display: flex; align-items: baseline; gap: 8px; }
+.ach-read-big  {
+  font-family: var(--mono); font-size: 24px; font-weight: 800;
+  /* color: #ffffff; line-height: 1; */  color: var(--ink); line-height: 1;
+}
+.ach-read-pct  {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  padding: 3px 9px; border-radius: 20px;
+  background: var(--g50); color: var(--g800);
+  border: 1px solid var(--g200);
+}
+.ach-read-sub  {
+  font-size: 10.5px; color: var(--muted); margin-top: 4px;
+  font-family: var(--mono); font-weight: 500;
+}
+
+/* Grade distribution — the "achievements" row */
+.ach-grades { flex: 1; min-width: 400px; }
+.ach-grade-chips {
+  display: flex; gap: 6px; align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+.grade-chip {
+  display: inline-flex; flex-direction: column; align-items: center;
+  padding: 5px 12px; border-radius: 10px;
+  border: 1px solid; min-width: 78px; flex-shrink: 0;
+  transition: transform .12s;
+}
+.grade-chip:hover { transform: translateY(-1px); }
+.grade-chip .gc-count {
+  font-family: var(--mono); font-size: 15px; font-weight: 800; line-height: 1;
+}
+.grade-chip .gc-label {
+  font-size: 9px; font-weight: 700; margin-top: 3px;
+  letter-spacing: .5px; text-transform: uppercase;
+}
+.grade-chip.Excellent  { background: #d4ecc4;          border-color: #6aaf3a;              color: #1a5210; }
+.grade-chip.Good       { background: #eaf6d8;          border-color: #a8d078;              color: #3d6e18; }
+.grade-chip.Fair       { background: var(--yellow-bg); border-color: var(--yellow-border); color: var(--yellow-dark); }
+.grade-chip.Poor       { background: #fff3e0;          border-color: #e8b870;              color: #7a3800; }
+.grade-chip.Unreliable { background: var(--red-bg);    border-color: var(--red-border);    color: var(--red-dark); }
+
+/* Velocity capsules + settings inline */
+.ach-velocity { min-width: 240px; }
+.ach-vel-row { display: flex; align-items: center; gap: 6px; }
+.vel-cap {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 12px; border-radius: 20px;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  white-space: nowrap;
+}
+.vel-cap b { font-weight: 800; }
+.vel-cap.A { background: var(--g50);      color: var(--g800);       border: 1px solid var(--g200); }
+.vel-cap.B { background: var(--yellow-bg); color: var(--yellow-dark); border: 1px solid var(--yellow-border); }
+.vel-cap.C { background: #eff0ea;         color: #4a5c3a;            border: 1px solid #c4cebc; }
+
+/* Balance-scale settings button — inline with velocity */
+.vel-settings-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 7px;
+  border: 1px dashed var(--border);
+  background: transparent; color: var(--muted2);
+  cursor: pointer; transition: all .15s;
+  margin-left: 2px;
+}
+.vel-settings-btn:hover {
+  background: var(--g50); border-color: var(--g400);
+  color: var(--g700); border-style: solid;
+}
+.vel-settings-btn svg { width: 15px; height: 15px; }
+
+/* Last batch */
+.ach-batch { min-width: 130px; }
+.ach-batch-val {
+  font-family: var(--mono); font-size: 12px; font-weight: 700;
+  color: var(--ink2); line-height: 1.15;
+}
+.ach-batch-sub {
+  font-size: 10px; color: var(--muted);
+  font-family: var(--mono); margin-top: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════
+   URGENCY TABS — elevated button cards on tinted strip
+═══════════════════════════════════════════════════════ */
+.urgency-tabs {
+  min-height: var(--tabs-h);
+  background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: stretch;
+  padding: 14px 16px;
+  gap: 14px;
+  position: relative;
+}
+.ut-tab {
+  flex: 1; display: flex; align-items: center; gap: 14px;
+  padding: 14px 20px;
+  cursor: pointer;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 2px solid transparent;
+  box-shadow: var(--shadow-btn);
+  transition: transform .18s cubic-bezier(.2,.7,.2,1),
+              box-shadow .18s cubic-bezier(.2,.7,.2,1),
+              border-color .15s, background .15s;
+  position: relative;
+  overflow: hidden;
+}
+.ut-tab::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  opacity: 0; transition: opacity .18s;
+}
+.ut-tab.urgent::before { background: linear-gradient(90deg, var(--red)    0%, #d85555 100%); }
+.ut-tab.watch::before  { background: linear-gradient(90deg, var(--yellow) 0%, #d89020 100%); }
+.ut-tab.ok::before     { background: linear-gradient(90deg, var(--ok)   0%, var(--ok-light) 100%); }
+
+.ut-tab:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-btn-hover);
+}
+.ut-tab:hover::before { opacity: 1; }
+.ut-tab.urgent:hover { border-color: var(--red-border); }
+.ut-tab.watch:hover  { border-color: var(--yellow-border); }
+.ut-tab.ok:hover     { border-color: var(--ok-light); }
+
+.ut-tab.active {
+  transform: translateY(-3px);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%);
+}
+.ut-tab.active::before { opacity: 1; height: 4px; }
+.ut-tab.urgent.active {
+  border-color: var(--red);
+  box-shadow: 0 12px 28px rgba(184,50,50,.22), 0 4px 10px rgba(184,50,50,.12);
+}
+.ut-tab.watch.active {
+  border-color: var(--yellow);
+  box-shadow: 0 12px 28px rgba(184,112,0,.22), 0 4px 10px rgba(184,112,0,.12);
+}
+.ut-tab.ok.active {
+  border-color: var(--g500);
+  box-shadow: 0 12px 28px rgba(26,92,138,.22), 0 4px 10px rgba(26,92,138,.12);
+}
+
+.ut-icon-wrap {
+  width: 46px; height: 46px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: transform .18s;
+}
+.ut-tab:hover .ut-icon-wrap { transform: scale(1.06); }
+.ut-tab.urgent .ut-icon-wrap { background: var(--red-bg);    box-shadow: inset 0 0 0 1px var(--red-border); }
+.ut-tab.watch  .ut-icon-wrap { background: var(--yellow-bg); box-shadow: inset 0 0 0 1px var(--yellow-border); }
+.ut-tab.ok     .ut-icon-wrap { background: var(--ok-bg);     box-shadow: inset 0 0 0 1px var(--ok-border); }
+.ut-icon {
+  width: 20px; height: 20px; border-radius: 50%;
+  position: relative;
+}
+.ut-tab.urgent .ut-icon { background: var(--red);   box-shadow: 0 0 0 4px rgba(184,50,50,.18); }
+.ut-tab.watch  .ut-icon { background: var(--yellow);box-shadow: 0 0 0 4px rgba(184,112,0,.18); }
+.ut-tab.ok     .ut-icon { background: var(--ok);    box-shadow: 0 0 0 4px rgba(58,138,40,.18); }
+.ut-tab.urgent.active .ut-icon { animation: pulseUrgent 1.6s ease-in-out infinite; }
+@keyframes pulseUrgent {
+  0%,100% { box-shadow: 0 0 0 4px rgba(184,50,50,.18); }
+  50%     { box-shadow: 0 0 0 8px rgba(184,50,50,.08); }
+}
+
+.ut-body { min-width: 0; flex: 1; }
+.ut-count-row { display: flex; align-items: baseline; gap: 7px; }
+.ut-count { font-family: var(--mono); font-size: 28px; font-weight: 800; line-height: 1; }
+.ut-tab.urgent .ut-count { color: var(--red); }
+.ut-tab.watch  .ut-count { color: var(--yellow); }
+.ut-tab.ok     .ut-count { color: var(--ok-dark); }
+.ut-cta {
+  font-size: 9.5px; font-weight: 700; font-family: var(--mono);
+  color: var(--muted2); letter-spacing: 1px; text-transform: uppercase;
+  opacity: 0; transition: opacity .18s;
+}
+.ut-tab:hover .ut-cta,
+.ut-tab.active .ut-cta { opacity: 1; }
+.ut-tab.active .ut-cta { color: var(--g700); }
+
+.ut-label { font-size: 13px; font-weight: 700; color: var(--ink2); margin-top: 3px; }
+.ut-sub   { font-size: 10.5px; color: var(--muted); margin-top: 2px; line-height: 1.3; font-weight: 500; }
+
+/* Old sliding indicator no longer used — the active button state IS the indicator */
+.ut-indicator { display: none; }
+
+/* Discoverability boost for the action tiles — in dark mode the tile-on-tinted-strip
+   contrast is subtle and new users don't read them as clickable. This adds a soft
+   inset ring (still theme-respecting, not a bright border), keeps the "View →" CTA
+   visible instead of hover-only, and shifts the cursor affordance up a notch. */
+html[data-theme="dark"] .ut-tab {
+  box-shadow: var(--shadow-btn),
+              inset 0 0 0 1px rgba(255,255,255,.08);
+}
+html[data-theme="dark"] .ut-tab:hover {
+  box-shadow: var(--shadow-btn-hover),
+              inset 0 0 0 1px rgba(255,255,255,.14);
+}
+html[data-theme="dark"] .ut-cta { opacity: .55; }
+html[data-theme="dark"] .ut-tab:hover .ut-cta,
+html[data-theme="dark"] .ut-tab.active .ut-cta { opacity: 1; }
+
+/* ═══════════════════════════════════════════════════════
+   PLANNING TOOLBAR — always-visible strip above the urgency tabs.
+   The horizon selector drives the tab counts, so it must be
+   reachable before a tab is chosen. Its own colours mirror the
+   in-list .toolbar / .horizon-btn so behaviour is consistent when
+   the SKU list is (and isn't) visible.
+═══════════════════════════════════════════════════════ */
+.planning-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px;
+  background: var(--surface2); border-bottom: 1px solid var(--border2);
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.planning-toolbar .toolbar-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 1.5px; color: var(--muted2);
+}
+.planning-toolbar .horizon-group {
+  display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+}
+.planning-toolbar .horizon-btn {
+  padding: 5px 14px; font-size: 11.5px; font-weight: 700;
+  cursor: pointer; background: var(--surface); color: var(--muted);
+  border-right: 1px solid var(--border); transition: all .12s;
+  font-family: var(--mono);
+}
+.planning-toolbar .horizon-btn:last-child { border-right: none; }
+.planning-toolbar .horizon-btn:hover:not(.active) { background: var(--g50); color: var(--g700); }
+
+/* Active state — needed visibility improvement per feedback.
+   In light mode --g800 gives a solid dark navy w/ white text (clear).
+   In dark mode --g800 becomes a pale blue (#c8ddf0), so text-on-that
+   was low contrast. Override with a distinctly filled treatment tied
+   to the brand red gradient in both modes so "which horizon is picked"
+   is unambiguous. */
+.planning-toolbar .horizon-btn.active {
+  background: linear-gradient(180deg, var(--g600) 0%, var(--g700) 100%);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15),
+              0 1px 3px rgba(0,0,0,.15);
+}
+html[data-theme="dark"] .planning-toolbar .horizon-btn.active {
+  background: linear-gradient(180deg, var(--g500) 0%, var(--g600) 100%);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.20),
+              0 1px 6px rgba(238,49,36,.35);
+}
+
+/* When the SKU list appears, its own toolbar becomes redundant with the
+   always-visible one above. Hide it via a scoped class so we don't have
+   two horizon selectors on screen. */
+.sku-slide-wrap .toolbar.dup-hidden { display: none; }
+
+/* SKU detail modal — horizon capsules (2D/3D/1W/2W/4W etc.)
+   Replaces the inline styles that used --g800 for the active state, which
+   flipped to a pale blue in dark mode and became low-contrast against
+   white text. Now the same brand-red-gradient treatment as the top toolbar
+   so the "which horizon am I viewing" answer is unambiguous. */
+.dh-hz-caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 4px; }
+.dh-hz-cap {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+  padding: 5px 12px; border-radius: 20px; cursor: pointer;
+  background: var(--surface); color: var(--ink2);
+  border: 1px solid var(--border);
+  transition: background .12s, border-color .12s, color .12s, box-shadow .12s;
+}
+.dh-hz-cap:hover:not(.active) { background: var(--g50); border-color: var(--g200); }
+.dh-hz-cap.extra {
+  background: var(--blue-bg); color: var(--blue);
+  border: 1px dashed var(--blue-border);
+}
+.dh-hz-cap.active {
+  background: linear-gradient(180deg, var(--g600) 0%, var(--g700) 100%);
+  color: #fff;
+  border-color: var(--g700);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15),
+              0 1px 3px rgba(0,0,0,.15);
+}
+html[data-theme="dark"] .dh-hz-cap.active {
+  background: linear-gradient(180deg, var(--g500) 0%, var(--g600) 100%);
+  border-color: var(--g600);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.20),
+              0 1px 6px rgba(238,49,36,.35);
+}
+/* And on the dark-modal head background, the non-active capsules default
+   to var(--surface) which is dark — make sure they're still legible. */
+.detail-head .dh-hz-cap:not(.active):not(.extra) {
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.85);
+  border-color: rgba(255,255,255,.14);
+}
+.detail-head .dh-hz-cap:not(.active):not(.extra):hover {
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.22);
+}
+.detail-head .dh-hz-cap.extra {
+  background: rgba(122,184,240,.15);
+  color: #a8d0f5;
+  border-color: rgba(122,184,240,.35);
+}
+
+/* ═══════════════════════════════════════════════════════
+   LANDING GRAPHIC — ambient full-width forecast backdrop
+═══════════════════════════════════════════════════════ */
+.landing-graphic {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--surface) 60%, var(--bg) 100%);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn .5s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Ambient bars strip — fills full width, faded to background */
+.lg-ambient {
+  position: absolute; inset: 0;
+  padding: 40px 60px 60px;
+  display: flex; flex-direction: column;
+  pointer-events: none;
+  opacity: .32;
+}
+.lg-bar-strip {
+  flex: 1;
+  display: flex; align-items: flex-end;
+  gap: 14px;
+  position: relative;
+}
+.lg-bar-strip .lg-bar {
+  flex: 1;
+  border-radius: 4px 4px 0 0;
+  transform-origin: bottom center;
+  animation: barPulse 6s cubic-bezier(.4,0,.6,1) infinite;
+  min-width: 24px;
+}
+/* Staggered greens */
+.lg-bar-strip .lg-bar:nth-child(4n+1) { background: var(--g300); }
+.lg-bar-strip .lg-bar:nth-child(4n+2) { background: var(--g400); }
+.lg-bar-strip .lg-bar:nth-child(4n+3) { background: var(--g500); }
+.lg-bar-strip .lg-bar:nth-child(4n+4) { background: var(--g400); }
+.lg-bar-strip .lg-bar:nth-child(1)  { animation-delay: 0s;    height: 55%; }
+.lg-bar-strip .lg-bar:nth-child(2)  { animation-delay: .5s;   height: 72%; }
+.lg-bar-strip .lg-bar:nth-child(3)  { animation-delay: 1s;    height: 60%; }
+.lg-bar-strip .lg-bar:nth-child(4)  { animation-delay: 1.5s;  height: 85%; }
+.lg-bar-strip .lg-bar:nth-child(5)  { animation-delay: 2s;    height: 68%; }
+.lg-bar-strip .lg-bar:nth-child(6)  { animation-delay: 2.5s;  height: 92%; }
+.lg-bar-strip .lg-bar:nth-child(7)  { animation-delay: 3s;    height: 78%; }
+.lg-bar-strip .lg-bar:nth-child(8)  { animation-delay: 3.5s;  height: 65%; }
+.lg-bar-strip .lg-bar:nth-child(9)  { animation-delay: 4s;    height: 80%; }
+.lg-bar-strip .lg-bar:nth-child(10) { animation-delay: 4.5s;  height: 58%; }
+.lg-bar-strip .lg-bar:nth-child(11) { animation-delay: 5s;    height: 75%; }
+.lg-bar-strip .lg-bar:nth-child(12) { animation-delay: 5.5s;  height: 62%; }
+.lg-bar-strip .lg-bar:nth-child(13) { animation-delay: 6s;    height: 88%; }
+.lg-bar-strip .lg-bar:nth-child(14) { animation-delay: 6.5s;  height: 70%; }
+@keyframes barPulse {
+  0%,100% { transform: scaleY(.5); }
+  50%     { transform: scaleY(1); }
+}
+
+/* Line drawn across, slow */
+.lg-line-full {
+  position: absolute; inset: 40px 60px 60px;
+  pointer-events: none;
+  opacity: .5;
+}
+.lg-line-full svg { width: 100%; height: 100%; overflow: visible; }
+.lg-line-full path {
+  fill: none; stroke: var(--g800); stroke-width: 2.5;
+  stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+  animation: lineDraw 8s ease-in-out infinite;
+}
+@keyframes lineDraw {
+  0%   { stroke-dashoffset: 1200; opacity: 0; }
+  15%  { opacity: .55; }
+  70%  { stroke-dashoffset: 0;    opacity: .55; }
+  95%  { stroke-dashoffset: 0;    opacity: 0; }
+  100% { stroke-dashoffset: 1200; opacity: 0; }
+}
+
+/* Slow sweeping scan line */
+.lg-scan {
+  position: absolute; top: 40px; bottom: 60px; left: 60px; right: 60px;
+  pointer-events: none;
+}
+.lg-scan::after {
+  content: ''; position: absolute; top: 0; bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, var(--g500), transparent);
+  opacity: .55;
+  animation: scanSweep 8s linear infinite;
+}
+@keyframes scanSweep {
+  from { left: -2px; }
+  to   { left: 100%; }
+}
+
+/* Centered cue overlay — sits on top of the ambient graphic */
+.lg-cue-panel {
+  position: relative; z-index: 5;
+  text-align: center;
+  max-width: 640px; padding: 32px 40px;
+  background: rgba(10,18,40,.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 20px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.2);
+  color: #fff;
+}
+.lg-tick-row {
+  display: flex; justify-content: center; gap: 32px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+.lg-tick {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.lg-t-label {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+  color: rgba(255,255,255,.5); letter-spacing: 1.8px; text-transform: uppercase;
+}
+.lg-t-val {
+  font-family: var(--mono); font-size: 22px; font-weight: 800;
+  color: #fff; line-height: 1;
+  min-width: 90px; text-align: center;
+}
+.lg-t-val.reliab { color: #EE3124; }
+.lg-t-val.tick { animation: valTick 1s ease; }
+@keyframes valTick {
+  0%   { transform: translateY(0);    opacity: 1; }
+  35%  { transform: translateY(-8px); opacity: 0; }
+  60%  { transform: translateY(8px);  opacity: 0; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+.lg-live-row {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-bottom: 18px;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+  color: rgba(255,255,255,.45); letter-spacing: 1px;
+}
+.lg-cue-text { color: rgba(255,255,255,.8); font-size: 14px; }
+.lg-cue-text b { color: #fff; }
+.lg-cue-sub { color: rgba(255,255,255,.3); }
+.lg-cue-arrow { color: #EE3124; }
+.lg-live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #EE3124;
+  animation: pulseDot 1.8s ease-in-out infinite;
+}
+@keyframes pulseDot {
+  0%,100% { transform: scale(1);   opacity: 1;  }
+  50%     { transform: scale(1.5); opacity: .4; }
+}
+.lg-cue-text {
+  font-size: 15px; font-weight: 600; color: var(--ink2);
+  line-height: 1.55;
+}
+.lg-cue-text b { color: var(--g700); font-weight: 800; }
+.lg-cue-arrow {
+  display: inline-block; margin-left: 6px; color: var(--g600); font-weight: 700;
+  animation: cueBounce 1.8s ease-in-out infinite;
+}
+@keyframes cueBounce {
+  0%,100% { transform: translateY(0); }
+  50%     { transform: translateY(-5px); }
+}
+.lg-cue-sub {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--muted2); letter-spacing: 1.5px;
+  text-transform: uppercase; margin-top: 10px;
+}
+.lg-mini-chips {
+  display: flex; justify-content: center; gap: 6px; margin-top: 18px;
+}
+.lg-chip {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+  padding: 4px 9px; border-radius: 12px;
+  background: var(--g50); color: var(--g800); border: 1px solid var(--g200);
+  cursor: pointer; transition: all .18s;
+}
+.lg-chip:hover { border-color: var(--g400); }
+.lg-chip.active { background: var(--g700); color: #fff; border-color: var(--g700); }
+
+/* ═══════════════════════════════════════════════════════
+   MAIN LAYOUT — SKU list area (flex-grows to fill space between tabs and QV)
+═══════════════════════════════════════════════════════ */
+.main-area {
+  flex: 1;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.sku-slide-wrap {
+  flex: 1; position: relative;
+  display: flex; flex-direction: column;
+}
+.slide-in-right { animation: slideInRight .28s cubic-bezier(.2,.7,.2,1); }
+.slide-in-left  { animation: slideInLeft  .28s cubic-bezier(.2,.7,.2,1); }
+@keyframes slideInRight { from { transform: translateX(28px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideInLeft  { from { transform: translateX(-28px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+.toolbar {
+  height: var(--toolbar-h);
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 16px;
+  background: var(--surface); border-bottom: 1px solid var(--border2);
+  flex-shrink: 0;
+}
+.toolbar-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted2); }
+.horizon-group { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.horizon-btn {
+  padding: 4px 12px; font-size: 11px; font-weight: 600;
+  cursor: pointer; background: var(--surface); color: var(--muted);
+  border-right: 1px solid var(--border); transition: all .12s;
+  font-family: var(--mono);
+}
+.horizon-btn:last-child { border-right: none; }
+.horizon-btn.active { background: var(--g800); color: #fff; }
+.horizon-btn:hover:not(.active) { background: var(--g50); color: var(--g700); }
+.tier-filter { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-left: auto; }
+.tier-filter-btn {
+  padding: 4px 12px; font-size: 10.5px; font-weight: 700;
+  cursor: pointer; background: var(--surface); color: var(--muted);
+  border-right: 1px solid var(--border); transition: all .12s; white-space: nowrap;
+}
+.tier-filter-btn:last-child { border-right: none; }
+.tier-filter-btn.active { background: var(--g800); color: #fff; }
+.tier-filter-btn:hover:not(.active) { background: var(--g50); }
+.tier-filter-btn.wes-pill.active { background: var(--blue); }
+.tier-filter-btn.wes-pill { border-left: 2px solid var(--border); }
+
+/* SKU table */
+.sku-table-area { flex: 1; }
+
+.tier-block { border-bottom: 2px solid var(--border); }
+.tier-block-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 16px; background: var(--bg2);
+  border-bottom: 1px solid var(--border2);
+  cursor: pointer; user-select: none;
+  position: sticky; top: 0; z-index: 10;
+}
+.tier-badge {
+  width: 22px; height: 22px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; flex-shrink: 0;
+}
+.tier-badge.A { background: var(--g600); color: #fff; }
+.tier-badge.B { background: var(--yellow); color: #fff; }
+.tier-badge.C { background: #7a8c6a; color: #fff; }
+.tier-title { font-size: 12.5px; font-weight: 700; }
+.tier-subtitle { font-size: 10px; color: var(--muted); }
+.tier-stats { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.tier-stat { font-size: 10px; font-family: var(--mono); }
+.tier-stat .n { font-weight: 700; }
+.tier-stat .n.red { color: var(--red); }
+.tier-stat .n.yellow { color: var(--yellow); }
+.tier-stat .n.green { color: var(--g600); }
+.tier-chevron { font-size: 10px; color: var(--muted2); transition: transform .2s; }
+.tier-block.collapsed .tier-chevron { transform: rotate(-90deg); }
+
+.sku-table-wrap { overflow-x: auto; }
+table.sku-tbl { width: 100%; border-collapse: collapse; }
+table.sku-tbl thead tr { background: var(--bg); position: sticky; top: 0; z-index: 5; }
+table.sku-tbl th {
+  padding: 6px 12px; text-align: left;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--muted2); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+table.sku-tbl td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border2);
+  vertical-align: middle; font-size: 12px;
+}
+.sku-row { cursor: pointer; transition: background .08s; }
+.sku-row:hover td { background: var(--g50); }
+.sku-row.selected td { background: #e8f0fb; }
+
+.col-sku    { width: 210px; }
+.col-status { width: 100px; }
+.col-need   { width: 155px; }
+.col-conf   { width: 140px; }
+.col-num    { width: 78px; text-align: right !important; }
+.col-gap    { width: 100px; }
+.col-wape   { width: 80px; }
+.col-model  { width: 80px; }
+.analyst-col { display: none; }
+body.analyst-mode .analyst-col { display: table-cell; }
+
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--g700); }
+th.sort-asc::after  { content: ' ▲'; font-size: 7px; }
+th.sort-desc::after { content: ' ▼'; font-size: 7px; }
+
+.sku-cell-name { font-weight: 700; font-size: 11.5px; font-family: var(--mono); color: var(--ink2); }
+.sku-cell-desc {
+  font-size: 10.5px; color: var(--muted); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 185px;
+  font-weight: 500;
+}
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700;
+}
+.status-pill.urgent { background: var(--red-bg); color: var(--red-dark); border: 1px solid var(--red-border); }
+.status-pill.watch  { background: var(--yellow-bg); color: var(--yellow-dark); border: 1px solid var(--yellow-border); }
+.status-pill.ok     { background: var(--ok-bg); color: var(--ok-dark); border: 1px solid var(--ok-border); }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-pill.urgent .status-dot { background: var(--red); }
+.status-pill.watch  .status-dot { background: var(--yellow); }
+.status-pill.ok     .status-dot { background: var(--ok); }
+
+.need-cell { display: flex; flex-direction: column; gap: 2px; }
+.need-val { font-size: 12.5px; font-weight: 800; font-family: var(--mono); }
+.need-val.red    { color: var(--red-dark); }
+.need-val.yellow { color: var(--yellow-dark); }
+.need-val.green  { color: var(--g700); }
+.need-sub { font-size: 10px; color: var(--muted2); font-weight: 500; }
+
+.conf-cell { display: flex; flex-direction: column; gap: 3px; }
+.conf-grade {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; padding: 3px 8px;
+  border-radius: var(--radius-sm); border: 1px solid;
+}
+.conf-grade.Excellent  { background: #d4ecc4;          color: #1a5210;           border-color: #6aaf3a; }
+.conf-grade.Good       { background: #eaf6d8;          color: #3d6e18;           border-color: #a8d078; }
+.conf-grade.Fair       { background: var(--yellow-bg); color: var(--yellow-dark); border-color: var(--yellow-border); }
+.conf-grade.Poor       { background: #fff3e0;          color: #7a3800;           border-color: #e8b870; }
+.conf-grade.Unreliable { background: var(--red-bg);    color: var(--red-dark);   border-color: var(--red-border); }
+.conf-sub { font-size: 9.5px; color: var(--muted); font-family: var(--mono); font-weight: 500; }
+
+.gap-cell { display: flex; flex-direction: column; gap: 3px; }
+.gap-bar-row { display: flex; align-items: center; gap: 5px; }
+.gap-track { flex: 1; height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+.gap-fill.red    { height: 100%; border-radius: 2px; background: var(--red); }
+.gap-fill.yellow { height: 100%; border-radius: 2px; background: var(--yellow); }
+.gap-fill.green  { height: 100%; border-radius: 2px; background: var(--g500); }
+.gap-pct-txt { font-size: 10px; font-weight: 700; font-family: var(--mono); min-width: 40px; text-align: right; }
+.gap-pct-txt.red    { color: var(--red-dark); }
+.gap-pct-txt.yellow { color: var(--yellow-dark); }
+.gap-pct-txt.green  { color: var(--g700); }
+
+.wape-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 6px; border-radius: var(--radius-sm); font-size: 10px; font-weight: 600;
+  font-family: var(--mono); border: 1px solid;
+}
+.wape-badge.good { background: var(--g50); color: var(--g800); border-color: var(--g200); }
+.wape-badge.ok   { background: var(--yellow-bg); color: var(--yellow-dark); border-color: var(--yellow-border); }
+.wape-badge.poor { background: var(--red-bg); color: var(--red-dark); border-color: var(--red-border); }
+
+.model-tag {
+  font-size: 10px; padding: 2px 6px; border-radius: var(--radius-sm);
+  background: var(--bg2); color: var(--muted); font-family: var(--mono); border: 1px solid var(--border);
+}
+.model-tag.arima,.model-tag.sarima,.model-tag.ets {
+  background: var(--g50); color: var(--g800); border-color: var(--g200);
+}
+
+.empty-state { padding: 40px 20px; text-align: center; color: var(--muted); font-size: 13px; }
+
+/* ═══════════════════════════════════════════════════════
+   QUICK OVERVIEW — chart backgrounds per row
+═══════════════════════════════════════════════════════ */
+.quickview-area {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.qv-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 16px 0;
+}
+.qv-header-label {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1.5px; color: var(--muted2);
+}
+.qv-collapse-btn {
+  font-size: 10px; color: var(--muted2); cursor: pointer;
+  padding: 2px 6px; border-radius: var(--radius-sm);
+  transition: background .1s; user-select: none;
+}
+.qv-collapse-btn:hover { background: var(--bg2); }
+.qv-panels { display: flex; }
+.qv-panel {
+  flex: 1; padding: 10px 16px 12px; border-right: 1px solid var(--border2);
+  min-width: 0;
+}
+.qv-panel:last-child { border-right: none; }
+.qv-panel-title {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1.5px; color: var(--muted2); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 5px;
+}
+.qv-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: background .08s; margin-bottom: 2px;
+  position: relative; overflow: hidden;
+}
+.qv-row:hover { background: var(--g50); }
+.qv-row.selected { background: #e8f0fb; }
+/* Bar background for inventory rows: proportional to on_hand */
+.qv-row .qv-barbg {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, rgba(26,92,138,.20), rgba(26,92,138,.06));
+  border-right: 1px solid rgba(26,92,138,.25);
+  pointer-events: none;
+  z-index: 0;
+}
+/* Sparkline background for demand rows: decorative curve, right-aligned */
+.qv-row .qv-sparkbg {
+  position: absolute; right: 6px; top: 50%;
+  width: 60%; max-width: 220px; height: 22px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: .35;
+}
+.qv-row .qv-sparkbg svg { width: 100%; height: 100%; overflow: visible; }
+.qv-row .qv-sparkbg svg path { fill: none; stroke: var(--g500); stroke-width: 1.5; stroke-linecap: round; }
+.qv-row > * { position: relative; z-index: 1; }
+.qv-rank { font-size: 10px; font-weight: 800; color: var(--muted2); width: 14px; flex-shrink: 0; font-family: var(--mono); }
+.qv-name { font-size: 12px; font-weight: 700; font-family: var(--mono); color: var(--ink2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qv-val  { font-size: 12.5px; font-weight: 800; font-family: var(--mono); color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+.qv-tag  {
+  font-size: 10px; font-weight: 700; padding: 2px 7px;
+  border-radius: 10px; white-space: nowrap; flex-shrink: 0;
+}
+.qv-tag.urgent { background: var(--red-bg); color: var(--red-dark); border: 1px solid var(--red-border); }
+.qv-tag.watch  { background: var(--yellow-bg); color: var(--yellow-dark); border: 1px solid var(--yellow-border); }
+.qv-tag.ok     { background: var(--ok-bg); color: var(--ok-dark); border: 1px solid var(--ok-border); }
+.qv-tier {
+  font-size: 9.5px; font-weight: 800; padding: 2px 6px;
+  border-radius: 4px; flex-shrink: 0; font-family: var(--mono);
+  letter-spacing: .3px;
+}
+.qv-tier.A { background: var(--g600); color: #fff; }
+.qv-tier.B { background: var(--yellow); color: #fff; }
+.qv-tier.C { background: #7a8c6a; color: #fff; }
+
+/* WMS source tag */
+.wms-tag {
+  font-size: 9px; font-weight: 700; padding: 1px 5px;
+  border-radius: 3px; background: var(--blue-bg);
+  color: var(--blue); border: 1px solid var(--blue-border);
+  font-family: var(--mono); flex-shrink: 0; white-space: nowrap;
+}
+
+/* New entries panel */
+.qv-panel.new-entries {
+  border-left: 2px solid var(--blue-border);
+  background: linear-gradient(180deg, rgba(238,245,251,.6), var(--surface));
+}
+.qv-panel.new-entries .qv-panel-title { color: var(--blue); }
+.qv-new-entries-scroll {
+  max-height: 108px;
+  overflow-y: auto;
+}
+.qv-new-entries-scroll::-webkit-scrollbar { width: 3px; }
+.qv-new-entries-scroll::-webkit-scrollbar-thumb { background: var(--blue-border); border-radius: 2px; }
+.qv-new-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: var(--radius-sm);
+  margin-bottom: 3px; background: rgba(255,255,255,.75);
+  border: 1px solid var(--blue-border);
+  overflow: hidden;
+}
+.qv-new-icon {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--blue); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+.qv-new-icon svg { width: 10px; height: 10px; position: relative; z-index: 1; }
+.qv-new-icon::after {
+  content: ''; position: absolute; left: 0; top: 0;
+  width: 100%; height: 100%; border-radius: 50%;
+  background: var(--blue); opacity: .3;
+  animation: newPulse 1.8s ease-in-out infinite;
+}
+@keyframes newPulse {
+  0%,100% { transform: scale(1); opacity: .3; }
+  50%     { transform: scale(1.8); opacity: 0; }
+}
+.qv-new-sku  { font-size: 11px; font-weight: 700; font-family: var(--mono); color: var(--ink2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qv-new-val  { font-size: 10.5px; font-weight: 700; font-family: var(--mono); color: var(--muted); white-space: nowrap; margin-left: auto; }
+.qv-new-note { font-size: 9px; color: var(--blue); font-weight: 600; white-space: nowrap; }
+
+/* ═══════════════════════════════════════════════════════
+   DATE RANGE PICKER
+═══════════════════════════════════════════════════════ */
+.date-range-wrap { position: relative; }
+.date-range-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg);
+  font-size: 10.5px; font-family: var(--mono); color: var(--muted);
+  cursor: pointer; transition: all .12s; white-space: nowrap; user-select: none;
+}
+.date-range-btn:hover { border-color: var(--g400); color: var(--g700); background: var(--g50); }
+.date-range-btn.open  { border-color: var(--g500); color: var(--g700); background: var(--g50); }
+.drb-arrow { font-size: 8px; opacity: .6; }
+.drb-cal-icon { width: 13px; height: 13px; flex-shrink: 0; color: currentColor; opacity: .85; }
+html[data-theme="dark"] .drb-cal-icon { color: rgba(255,255,255,.85); opacity: 1; }
+html[data-theme="dark"] .date-range-btn { color: rgba(255,255,255,.85); }
+html[data-theme="dark"] .date-range-btn:hover,
+html[data-theme="dark"] .date-range-btn.open { color: #fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.30); }
+
+.date-picker-pop {
+  display: none; position: absolute; top: calc(100% + 6px); left: 0;
+  z-index: 300; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 16px; box-shadow: var(--shadow-lg); width: 300px;
+}
+.date-picker-pop.open { display: block; max-height: 80vh; overflow-y: auto; animation: dpIn .15s ease; }
+@keyframes dpIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+
+.dp-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted2); margin-bottom: 12px; }
+.dp-fields { display: flex; gap: 10px; margin-bottom: 10px; }
+.dp-field { flex: 1; }
+.dp-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted2); margin-bottom: 4px; }
+.dp-input {
+  width: 100%; padding: 5px 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg);
+  font-family: var(--mono); font-size: 11px; color: var(--ink2); outline: none;
+}
+.dp-input:focus { border-color: var(--g400); }
+.dp-weeks-label { font-size: 10.5px; color: var(--muted); font-family: var(--mono); margin-bottom: 12px; min-height: 18px; }
+.dp-weeks-label strong { color: var(--g700); }
+.dp-divider { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted2); margin-bottom: 8px; }
+.dp-snaps { display: flex; gap: 5px; flex-wrap: wrap; }
+.dp-snap {
+  padding: 4px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg);
+  font-size: 10px; font-weight: 700; cursor: pointer;
+  font-family: var(--mono); transition: all .1s; white-space: nowrap;
+}
+.dp-snap:hover { background: var(--g50); border-color: var(--g400); color: var(--g700); }
+.dp-snap.active { background: var(--g800); color: #fff; border-color: var(--g800); }
+.dp-snap-sub { font-size: 8.5px; font-weight: 500; opacity: .75; display: block; margin-top: 1px; }
+
+/* ═══════════════════════════════════════════════════════
+   DETAIL MODAL — replaces the old right-panel slide
+═══════════════════════════════════════════════════════ */
+.detail-backdrop {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(4px);
+  z-index: 800;
+  opacity: 0; transition: opacity .2s ease;
+}
+.detail-backdrop.open { display: block; opacity: 1; }
+
+.detail-modal {
+  display: none; position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(.96);
+  width: min(760px, 94vw);
+  max-height: 90vh;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--shadow-modal);
+  z-index: 900;
+  flex-direction: column;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.detail-modal.open {
+  display: flex;
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* Detail header */
+.detail-head {
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%);
+  flex-shrink: 0;
+}
+.dh-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+.dh-meta { flex: 1; min-width: 0; margin-right: 10px; }
+.dh-sku  { font-size: 10px; font-family: var(--mono); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.dh-name {
+  font-size: 16px; font-weight: 800; margin-top: 3px; line-height: 1.25;
+  color: var(--ink); word-break: break-word;
+}
+.dh-close {
+  width: 30px; height: 30px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 14px; color: var(--muted);
+  flex-shrink: 0; transition: all .12s;
+}
+.dh-close:hover { background: var(--red-bg); border-color: var(--red-border); color: var(--red-dark); }
+
+.fc-grade-banner {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius);
+  border: 1px solid; margin-bottom: 10px;
+}
+.fc-grade-banner.Excellent  { background: #d4ecc4;          border-color: #6aaf3a;             }
+.fc-grade-banner.Good       { background: #eaf6d8;          border-color: #a8d078;             }
+.fc-grade-banner.Fair       { background: var(--yellow-bg); border-color: var(--yellow-border);}
+.fc-grade-banner.Poor       { background: #fff3e0;          border-color: #e8b870;             }
+.fc-grade-banner.Unreliable { background: var(--red-bg);    border-color: var(--red-border);   }
+.fcg-icon { font-size: 18px; flex-shrink: 0; line-height: 1; margin-top: 1px; }
+.fcg-body { flex: 1; min-width: 0; }
+.fcg-label-row { display: flex; align-items: baseline; gap: 8px; }
+.fcg-tag {
+  font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 4px;
+}
+.fc-grade-banner.Excellent  .fcg-tag { color: #1a5210;          background: rgba(46,98,25,.16); }
+.fc-grade-banner.Good       .fcg-tag { color: #3d6e18;          background: rgba(120,180,80,.14); }
+.fc-grade-banner.Fair       .fcg-tag { color: var(--yellow-dark); background: rgba(192,122,0,.1); }
+.fc-grade-banner.Poor       .fcg-tag { color: #7a3800;          background: rgba(192,92,0,.1);  }
+.fc-grade-banner.Unreliable .fcg-tag { color: var(--red-dark);  background: rgba(184,50,50,.1); }
+.fcg-wape { font-size: 10.5px; font-family: var(--mono); font-weight: 600; color: var(--muted); }
+.fcg-desc { font-size: 11px; font-weight: 500; margin-top: 3px; line-height: 1.4; }
+.fc-grade-banner.Excellent  .fcg-desc { color: #1a5210; }
+.fc-grade-banner.Good       .fcg-desc { color: #3d6e18; }
+.fc-grade-banner.Fair       .fcg-desc { color: var(--yellow-dark); }
+.fc-grade-banner.Poor       .fcg-desc { color: #7a3800; }
+.fc-grade-banner.Unreliable .fcg-desc { color: var(--red-dark); }
+
+.action-hero {
+  padding: 11px 13px; border-radius: var(--radius);
+  font-size: 12.5px; font-weight: 500; line-height: 1.55;
+  margin-bottom: 10px;
+}
+.action-hero.urgent { background: var(--red-bg); border: 1px solid var(--red-border); color: var(--ink2); }
+.action-hero.watch  { background: var(--yellow-bg); border: 1px solid var(--yellow-border); color: var(--ink2); }
+.action-hero.ok     { background: var(--g50); border: 1px solid var(--g200); color: var(--ink2); }
+.action-hero strong { font-weight: 800; color: var(--ink); }
+.hero-produce {
+  display: block; margin-top: 6px;
+  font-size: 15px; font-weight: 800; font-family: var(--mono); line-height: 1.2;
+}
+.action-hero.urgent .hero-produce { color: var(--red-dark); }
+.action-hero.watch  .hero-produce { color: var(--yellow-dark); }
+.action-hero.ok     .hero-produce { color: var(--g700); }
+
+.dh-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+.dh-tag {
+  font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+  background: var(--bg2); color: var(--muted2); border: 1px solid var(--border2);
+}
+.dh-tag.ml { background: var(--g50); color: var(--g800); border-color: var(--g200); font-family: var(--mono); }
+
+.detail-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; }
+.ds { padding: 14px 20px; border-bottom: 1px solid var(--border2); }
+.ds:last-child { border-bottom: none; }
+.ds-title {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 2px; color: var(--muted2); margin-bottom: 10px;
+}
+
+.inv-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.inv-card {
+  padding: 9px 11px; border-radius: var(--radius);
+  border: 1px solid var(--border2); background: var(--bg);
+}
+.ic-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted2); }
+.ic-val { font-size: 17px; font-weight: 800; line-height: 1.1; margin-top: 3px; font-family: var(--mono); color: var(--ink2); }
+.ic-val.red { color: var(--red-dark); }
+.ic-unit { font-size: 10px; color: var(--muted2); margin-top: 2px; font-weight: 500; }
+
+.prod-needed-card {
+  margin-top: 6px; padding: 10px 13px; border-radius: var(--radius);
+  border: 1px solid var(--red-border); background: var(--red-bg);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.pnc-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--red-dark); opacity: .7; }
+.pnc-val   { font-size: 22px; font-weight: 800; font-family: var(--mono); color: var(--red-dark); line-height: 1; margin-top: 2px; }
+.pnc-right { font-size: 11.5px; font-weight: 700; color: var(--red-dark); opacity: .8; text-align: right; line-height: 1.4; }
+
+.horizon-tbl { width: 100%; border-collapse: collapse; }
+.horizon-tbl th {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--muted2); padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.horizon-tbl td { padding: 7px 8px; border-bottom: 1px solid var(--border2); font-size: 12px; font-family: var(--mono); font-weight: 500; color: var(--ink2); }
+.horizon-tbl tr.h-active td { background: var(--g50); font-weight: 700; }
+.h-gap.pos { color: var(--red-dark); font-weight: 700; }
+.h-gap.neg { color: var(--g700); font-weight: 700; }
+
+.chart-wrap { position: relative; height: 195px; margin-top: 6px; }
+
+.rm-tbl { width: 100%; border-collapse: collapse; }
+.rm-tbl th {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--muted2); padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.rm-tbl td { padding: 6px 8px; border-bottom: 1px solid var(--border2); font-size: 11.5px; }
+.rm-tbl tr.rm-total td { font-weight: 800; background: var(--g50); font-family: var(--mono); color: var(--ink2); }
+.rm-name { font-size: 11.5px; font-weight: 600; color: var(--ink2); }
+.rm-code { font-size: 9.5px; color: var(--muted2); font-family: var(--mono); margin-top: 1px; }
+
+/* ═══════════════════════════════════════════════════════
+   SETTINGS MODAL
+═══════════════════════════════════════════════════════ */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.35); z-index: 1000;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface); border-radius: var(--radius-lg);
+  padding: 24px; width: 360px; box-shadow: var(--shadow-lg);
+  animation: modalIn .18s ease;
+}
+@keyframes modalIn { from { opacity:0; transform:scale(.95); } to { opacity:1; transform:scale(1); } }
+.modal-title { font-size: 15px; font-weight: 800; margin-bottom: 4px; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.modal-title svg { width: 18px; height: 18px; color: var(--g700); }
+.modal-sub   { font-size: 11.5px; color: var(--muted); margin-bottom: 20px; font-weight: 500; }
+.modal-field { margin-bottom: 16px; }
+.modal-label { font-size: 11.5px; font-weight: 700; margin-bottom: 6px; display: flex; justify-content: space-between; color: var(--ink2); }
+.modal-label span { font-family: var(--mono); color: var(--g700); }
+input[type=range] { width: 100%; accent-color: var(--g500); }
+.modal-sum { font-size: 11px; padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 600; }
+.modal-sum.ok  { background: var(--g50); color: var(--g800); }
+.modal-sum.err { background: var(--red-bg); color: var(--red-dark); }
+.modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+.btn { padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 700; font-family: var(--font); transition: all .12s; }
+.btn-cancel { background: var(--bg2); color: var(--muted); border: 1px solid var(--border); }
+.btn-apply  { background: var(--g700); color: #fff; }
+.btn-apply:hover { background: var(--g800); }
+
+/* ═══════════════════════════════════════════════════════
+   LOADING / TOAST
+═══════════════════════════════════════════════════════ */
+.loading-overlay {
+  display: none; position: fixed; inset: 0; background: var(--bg); z-index: 500;
+  align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+}
+.loading-overlay.show { display: flex; }
+.spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid var(--border); border-top-color: var(--g500);
+  animation: spin .7s linear infinite;
+}
+.loading-text { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+
+.toast {
+  display: none; position: fixed; bottom: 24px; right: 24px;
+  background: var(--g900); color: #fff;
+  padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  box-shadow: var(--shadow-lg); z-index: 2000; animation: toastIn .18s ease;
+  max-width: 460px; line-height: 1.5;
+  word-break: break-word; white-space: pre-wrap;
+}
+.toast.show { display: block; }
+@keyframes toastIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+/* WES entries dark mode */
+html[data-theme="dark"] .wes-card,
+html[data-theme="dark"] .wes-entry { background: var(--surface); color: var(--ink); border-color: var(--border); }
+html[data-theme="dark"] .wes-entry .wes-sku { color: rgba(255,255,255,.92); }
+html[data-theme="dark"] .wes-entry .wes-inv { color: rgba(255,255,255,.75); }
+html[data-theme="dark"] .qv-wes-card { background: var(--surface); border-color: var(--border); }
+html[data-theme="dark"] .qv-wes-card .qv-wes-title { color: rgba(255,255,255,.8); }
+/* WES / New Entries panel dark-mode readability (WCAG AA on dark surface) */
+html[data-theme="dark"] .qv-panel.new-entries {
+  background: linear-gradient(180deg, rgba(122,184,240,.10), var(--surface));
+  border-left-color: rgba(122,184,240,.5);
+}
+html[data-theme="dark"] .qv-panel.new-entries .qv-panel-title { color: #9ecdf5; }
+html[data-theme="dark"] .qv-new-row {
+  background: rgba(255,255,255,.04);
+  border-color: rgba(122,184,240,.30);
+}
+html[data-theme="dark"] .qv-new-sku  { color: rgba(255,255,255,.95); }
+html[data-theme="dark"] .qv-new-val  { color: rgba(255,255,255,.78); }
+html[data-theme="dark"] .qv-new-note { color: #9ecdf5; }
+html[data-theme="dark"] .qv-new-icon { background: #4a90d0; }
+html[data-theme="dark"] .qv-new-icon::after { background: #4a90d0; }
+
+/* Dynamic graph hero text readability */
+
+/* Calendar/date picker dark mode */
+html[data-theme="dark"] .date-snap-btn { color: rgba(255,255,255,.7); border-color: rgba(255,255,255,.12); }
+html[data-theme="dark"] .date-range-btn { color: rgba(255,255,255,.7); border-color: rgba(255,255,255,.12); }
+html[data-theme="dark"] .date-picker-pop { background: var(--surface); border-color: var(--border); color: var(--ink); }
+html[data-theme="dark"] .date-picker-pop input { background: var(--bg); color: var(--ink); border-color: var(--border); }
+html[data-theme="dark"] .date-picker-pop button { color: var(--ink); }
+html[data-theme="dark"] .date-picker-pop .dp-apply { background: #EE3124; color: #fff; }
+
+/* Grade banner: border + font only, no background fill */
+.fc-grade-banner { background: transparent !important; }
+.fc-grade-banner.grade-Excellent { border-color: #2a8a40; color: #1a6b30; }
+.fc-grade-banner.grade-Good { border-color: #5cb868; color: #3a9a50; }
+.fc-grade-banner.grade-Fair { border-color: #dda030; color: #b87000; }
+.fc-grade-banner.grade-Poor { border-color: #e08040; color: #cc5500; }
+.fc-grade-banner.grade-Unreliable { border-color: #e06050; color: #cc2a1f; }
+html[data-theme="dark"] .fc-grade-banner.grade-Excellent { border-color: #2e7d34; color: #7fd88a; }
+html[data-theme="dark"] .fc-grade-banner.grade-Good { border-color: #7fc85a; color: #b0e090; }
+html[data-theme="dark"] .fc-grade-banner.grade-Fair { border-color: #dda030; color: #f0c050; }
+html[data-theme="dark"] .fc-grade-banner.grade-Poor { border-color: #e08040; color: #f0a060; }
+html[data-theme="dark"] .fc-grade-banner.grade-Unreliable { border-color: #e06050; color: #f08070; }
+
+/* Inline grade pill (SKU card modal) — colored border + text, transparent bg */
+.fc-grade-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 8px; padding: 2px 9px; border-radius: 999px;
+  border: 1.5px solid; background: transparent;
+  font-size: 10.5px; font-weight: 700; font-family: var(--font);
+  letter-spacing: .3px; vertical-align: middle;
+  text-transform: none; white-space: nowrap;
+}
+/* Grade color scale — Excellent = deep/vivid green (best), Good = lighter green */
+.fc-grade-pill.grade-Excellent { border-color: #1f6b28; color: #1f6b28; }
+.fc-grade-pill.grade-Good      { border-color: #6aaf3a; color: #4a7f22; }
+.fc-grade-pill.grade-Fair      { border-color: #d4a020; color: #8a6a10; }
+.fc-grade-pill.grade-Poor      { border-color: #d47a30; color: #a85c1a; }
+.fc-grade-pill.grade-Unreliable{ border-color: #c04a3a; color: #a3352a; }
+html[data-theme="dark"] .fc-grade-pill.grade-Excellent { border-color: #4fbf62; color: #7fe090; }
+html[data-theme="dark"] .fc-grade-pill.grade-Good      { border-color: #9fd870; color: #c0e8a0; }
+html[data-theme="dark"] .fc-grade-pill.grade-Fair      { border-color: #e0b040; color: #f0c860; }
+html[data-theme="dark"] .fc-grade-pill.grade-Poor      { border-color: #e08040; color: #f0a878; }
+html[data-theme="dark"] .fc-grade-pill.grade-Unreliable{ border-color: #d46050; color: #f08880; }
+
+
+/* Row 2 (powered-by strip) now hosts theme toggle + reset + analyst switch. */
+.poweredby-strip {
+  min-height: 34px !important;
+  padding: 4px 20px !important;
+  display: flex !important; align-items: center; justify-content: center;
+  position: relative;
+  background: #0d0d10 !important;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.poweredby-strip .ps-center {
+  color: rgba(255,255,255,.42);
+  letter-spacing: 1.8px;
+  font-size: 9.5px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+}
+.poweredby-strip .ps-right {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; gap: 8px;
+}
+/* header text label */
+.header .di-label { color: rgba(255,255,255,.78); }
+/* Detail modal head styled as brand blue gradient (visual link to top header). */
+.detail-head {
+  background: linear-gradient(135deg, #041228 0%, #065BAA 200%) !important;
+  color: #fff;
+  border-bottom: none;
+}
+.detail-head .dh-sku { color: rgba(255,255,255,.78); }
+.detail-head .dh-name { color: #fff; }
+.detail-head .dh-close {
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.22);
+  color: #fff;
+}
+.detail-head .dh-close:hover {
+  background: rgba(255,255,255,.20);
+  border-color: rgba(255,255,255,.32);
+  color: #fff;
+}
+.detail-head .dh-tag {
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.22);
+  color: #fff;
+}
+.detail-head .dh-tag.ml {
+  background: rgba(255,255,255,.14);
+  color: #fff; border-color: rgba(255,255,255,.28);
+}
+.detail-head .fc-grade-pill { background: rgba(255,255,255,.08); }
+.detail-head .action-hero { color: #fff; }
+.detail-head .action-hero strong { color: #fff; }
+/* The head is a fixed dark gradient in BOTH themes, so the hero box must use
+   translucent tints — the opaque light --red-bg/--yellow-bg made the white
+   body text invisible in light mode. */
+.detail-head .action-hero.urgent {
+  background: rgba(238,49,36,.16);
+  border-color: rgba(238,49,36,.42);
+}
+.detail-head .action-hero.watch {
+  background: rgba(232,184,48,.16);
+  border-color: rgba(232,184,48,.42);
+}
+.detail-head .action-hero.ok {
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.22);
+}
+.detail-head .action-hero.watch strong,
+.detail-head .action-hero.urgent strong { color: #fff; }
+/* Produce line needs a bright tint to stay legible on the dark head
+   (the light-theme --red-dark #8b1a1a was too dark against the navy). */
+.detail-head .action-hero.urgent .hero-produce { color: #ff9a8f; }
+.detail-head .action-hero.watch  .hero-produce { color: #ffcf6a; }
+.detail-head .action-hero.ok     .hero-produce { color: #a0e080; }
+/* Chevron caps in detail head become readable on dark. */
+.detail-head span[style*="var(--muted)"] { color: rgba(255,255,255,.75) !important; }
+
+/* ── Task 4 · font & muted contrast bump ── */
+body { font-size: 14px !important; }
+.qv-rank { font-size: 11px; color: var(--muted); }
+.qv-name { font-size: 12.5px; }
+.qv-val  { font-size: 13px; color: var(--ink2); }
+.qv-panel-title { font-size: 12px; }
+
+/* ── Open Orders (NETPET) ─────────────────────────────────────────── */
+.oo-fetch-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 7px 16px;
+  background: var(--surface2); border-bottom: 1px solid var(--border2);
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.oo-fetch-left  { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.oo-fetch-icon  { font-size: 13px; }
+.oo-fetch-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted2); }
+.oo-fetch-stamp { font-size: 11px; font-family: var(--mono); color: var(--muted); }
+.oo-fetch-right { display: flex; align-items: center; gap: 8px; position: relative; }
+.oo-refresh-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: 11px; font-weight: 700; font-family: var(--font);
+  color: var(--muted); cursor: pointer; transition: all .12s;
+}
+.oo-refresh-btn:hover:not(:disabled) { background: var(--g50); border-color: var(--g400); color: var(--g700); }
+.oo-refresh-btn:disabled { opacity: .6; cursor: default; }
+.oo-refresh-btn svg { width: 13px; height: 13px; }
+.oo-refresh-btn.loading svg { animation: spin .7s linear infinite; }
+.oo-tip {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+  max-width: 320px; padding: 8px 12px; border-radius: var(--radius);
+  background: var(--blue-bg); border: 1px solid var(--blue-border);
+  color: var(--blue); font-size: 11px; font-weight: 600; line-height: 1.4;
+  box-shadow: var(--shadow); animation: toastIn .18s ease;
+}
+/* SKU-list Open Orders column (always visible, mono like analyst cols) */
+.col-orders   { width: 96px; }
+.oo-cell      { display: flex; flex-direction: column; gap: 1px; }
+.oo-cell-w    { font-size: 12px; font-weight: 700; font-family: var(--mono); color: var(--ink2); }
+.oo-cell-sub  { font-size: 9.5px; color: var(--muted2); font-family: var(--mono); }
+.oo-cell-none { color: var(--muted2); font-size: 11px; }
+
+/* Detail modal · Order Breakdown */
+/* Full-width Order Breakdown bar (sits below the head tags) */
+.oo-open-btn {
+  display: flex; width: 100%; align-items: center; gap: 8px;
+  margin-top: 10px; padding: 9px 13px; border-radius: var(--radius);
+  border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.10);
+  color: #fff; font-size: 11.5px; font-weight: 700; font-family: var(--font);
+  cursor: pointer; transition: all .12s;
+}
+.oo-open-btn[hidden] { display: none !important; }
+.oo-open-btn #ooOpenCount { margin-left: auto; opacity: .7; font-family: var(--mono); }
+
+/* KPI cards live in the (always-dark) detail head now — restyle for it so they
+   read correctly in BOTH light and dark themes (the head is a fixed dark
+   gradient in both). */
+.detail-head .oo-kpi-card    { margin: 10px 0 8px; }
+.detail-head .oo-kpi-lead    { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.18); }
+.detail-head .oo-kpi-lead-label { color: rgba(255,255,255,.60); }
+.detail-head .oo-kpi-lead-val   { color: #fff; }
+.detail-head .oo-kpi-unit       { color: rgba(255,255,255,.55); }
+.detail-head .oo-kpi-lead-sub   { color: rgba(255,255,255,.72); }
+.detail-head .oo-kpi-tile { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14); }
+.detail-head .oo-kpi-k    { color: rgba(255,255,255,.60); }
+.detail-head .oo-kpi-v    { color: #fff; }
+.detail-head .oo-kpi-of   { color: rgba(255,255,255,.50); }
+.detail-head .oo-interp   { color: rgba(255,255,255,.60); border-left-color: rgba(255,255,255,.22); }
+
+/* A touch of breathing room above the family / WES·ASRS / model tags */
+.detail-head .dh-tags { margin-top: 8px; }
+.oo-open-btn:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.32); }
+.oo-open-caret { display: inline-block; transition: transform .18s; font-size: 9px; }
+.oo-open-btn.open .oo-open-caret { transform: rotate(90deg); }
+
+.oo-kpi-card { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; }
+.oo-kpi-lead { flex: 1; min-width: 180px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--g200); background: var(--g50); }
+.oo-kpi-lead-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted2); }
+.oo-kpi-lead-val { font-size: 26px; font-weight: 800; color: var(--ink); line-height: 1.1; margin-top: 4px; }
+.oo-kpi-unit { font-size: 12px; font-weight: 600; color: var(--muted2); }
+.oo-kpi-lead-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.oo-kpi-splits { flex: 1.4; min-width: 240px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.oo-kpi-tile { padding: 9px 10px; border-radius: var(--radius); border: 1px solid var(--border2); background: var(--bg); display: flex; flex-direction: column; }
+.oo-kpi-k { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted2); }
+.oo-kpi-v { font-size: 16px; font-weight: 800; color: var(--ink2); line-height: 1.1; margin-top: 3px; }
+.oo-kpi-of { font-size: 9px; color: var(--muted2); margin-top: 2px; font-weight: 500; }
+.oo-interp { font-size: 10.5px; color: var(--muted); line-height: 1.45; margin: 10px 0 4px; padding-left: 10px; border-left: 2px solid var(--border); font-style: italic; }
+
+.oo-ord-tblwrap { max-height: 220px; overflow-y: auto; margin-top: 8px; border: 1px solid var(--border2); border-radius: var(--radius); }
+.oo-ord-tbl { width: 100%; border-collapse: collapse; }
+.oo-ord-tbl thead tr { position: sticky; top: 0; background: var(--bg2); z-index: 2; }
+.oo-ord-tbl th { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--muted2); padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.oo-ord-tbl td { padding: 6px 8px; border-bottom: 1px solid var(--border2); font-size: 11px; color: var(--ink2); vertical-align: top; }
+.oo-ord-row { cursor: pointer; transition: background .08s; }
+.oo-ord-row:hover td { background: var(--g50); }
+.oo-ord-toggle { white-space: nowrap; font-weight: 700; }
+.oo-caret { display: inline-block; width: 12px; color: var(--muted2); }
+.oo-ord-cust { max-width: 150px; white-space: normal; word-break: break-word; font-weight: 600; }
+.oo-ord-notes { max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.oo-ord-detail td { background: var(--surface2); }
+.oo-ord-detgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; padding: 4px 2px 6px; }
+.oo-ord-detgrid > div { display: flex; flex-direction: column; }
+.oo-dfull { grid-column: 1 / -1; }
+.oo-dk { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted2); }
+.oo-dv { font-size: 11px; color: var(--ink2); margin-top: 1px; }
+.oo-unit-hint { font-size: 9.5px; color: var(--muted2); margin-top: 6px; }
+
+</style>
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading-overlay show" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-text">Loading PetMaxi Intelligence...</div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="abcModal">
+  <div class="modal">
+    <div class="modal-title">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="10" y1="4" x2="10" y2="18"/>
+        <line x1="6" y1="18" x2="14" y2="18"/>
+        <line x1="3" y1="7" x2="17" y2="7"/>
+        <path d="M3 7 L1 11 L5 11 Z" fill="currentColor" fill-opacity="0.18"/>
+        <path d="M17 7 L15 11 L19 11 Z" fill="currentColor" fill-opacity="0.18"/>
+      </svg>
+      Velocity Weight Settings
+    </div>
+    <div class="modal-sub">Controls how Fast / Medium / Slow movers are classified. Weights must sum to 1.0.</div>
+    <div class="modal-field">
+      <div class="modal-label">Volume Weight <span id="volWeightVal">0.70</span></div>
+      <input type="range" id="volWeight" min="0" max="100" value="70" step="5" oninput="updateWeights()">
+    </div>
+    <div class="modal-field">
+      <div class="modal-label">Frequency Weight <span id="freqWeightVal">0.30</span></div>
+      <input type="range" id="freqWeight" min="0" max="100" value="30" step="5" oninput="updateWeights()">
+    </div>
+    <div class="modal-sum ok" id="weightSum">✓ Weights sum to 1.0</div>
+    <div class="modal-btns">
+      <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-apply" id="applyWeightsBtn" onclick="applyWeights()">Apply &amp; Rebuild</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo" style="display:flex;align-items:center;gap:12px;flex-shrink:0">
+    <img src="data:image/png;base64,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" alt="Addverb" style="height:22px;width:auto;display:block">
+    <!-- <span class="di-label" style="font-size:11.5px;font-weight:700;letter-spacing:2.2px;text-transform:uppercase;color:rgba(255,255,255,.78);white-space:nowrap">Demand Intelligence</span> -->
+  </div>
+  <div class="header-nav" style="flex:1;justify-content:center;margin:0 24px">
+    <a href="/petmaxi-dashboard/" class="hn-link">Home</a>
+    <a href="/petmaxi-dashboard/planner" class="hn-link">Planner</a>
+    <a href="/petmaxi-dashboard/forecast" class="hn-link active">Forecast</a>
+    <a href="/petmaxi-dashboard/customers" class="hn-link">Customers</a>
+    <a href="/petmaxi-dashboard/analytics" class="hn-link">Analytics</a>
+  </div>
+  <div class="header-right" style="flex-shrink:0;gap:8px">
+    <img src="data:image/png;base64,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" alt="petMaxi" style="height:22px;width:auto;display:block">
+    <svg width="22" height="22" viewBox="0 0 100 100" style="flex-shrink:0" aria-hidden="true"><ellipse cx="28" cy="36" rx="11" ry="14" fill="#5cb032"/><ellipse cx="50" cy="28" rx="11" ry="14" fill="#5cb032"/><ellipse cx="72" cy="36" rx="11" ry="14" fill="#5cb032"/><ellipse cx="19" cy="58" rx="9" ry="11" fill="#5cb032"/><ellipse cx="81" cy="58" rx="9" ry="11" fill="#5cb032"/><ellipse cx="50" cy="72" rx="24" ry="20" fill="#5cb032"/></svg>
+  </div>
+</div>
+
+<div class="poweredby-strip"><span class="ps-center">DEMAND INTELLIGENCE &nbsp;·&nbsp; POWERED BY <b style="color:#EE3124">Addverb</b></span><div class="ps-right"><div class="analyst-toggle" id="analystToggle" onclick="toggleAnalystMode()">
+      <div class="atgl-track"></div>
+      <span>Analyst</span>
+    </div>
+    <div class="theme-toggle" role="group" aria-label="Theme">
+      <button class="tt-btn" data-tt="light" onclick="setTheme('light')" title="Light theme">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="3.5"/><line x1="10" y1="1.5" x2="10" y2="3.5"/><line x1="10" y1="16.5" x2="10" y2="18.5"/><line x1="1.5" y1="10" x2="3.5" y2="10"/><line x1="16.5" y1="10" x2="18.5" y2="10"/><line x1="4" y1="4" x2="5.4" y2="5.4"/><line x1="14.6" y1="14.6" x2="16" y2="16"/><line x1="4" y1="16" x2="5.4" y2="14.6"/><line x1="14.6" y1="5.4" x2="16" y2="4"/></svg>
+      </button>
+      <button class="tt-btn" data-tt="system" onclick="setTheme('system')" title="Match system">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="15" height="10.5" rx="1.5"/><line x1="7" y1="17.5" x2="13" y2="17.5"/><line x1="10" y1="14.5" x2="10" y2="17.5"/></svg>
+      </button>
+      <button class="tt-btn" data-tt="dark" onclick="setTheme('dark')" title="Dark theme">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 11.5 A 7 7 0 1 1 8.5 4 A 5.5 5.5 0 0 0 16 11.5 Z" fill="currentColor" fill-opacity="0.15"/></svg>
+      </button>
+    </div>
+    <button class="icon-btn" id="refreshBtn" onclick="refreshAll()" title="Reset view">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10 A 7 7 0 1 1 10 17"/><polyline points="3,5 3,10 8,10"/></svg>
+    </button></div></div>
+
+<!-- FRESHNESS -->
+<div class="freshness-banner" id="freshnessBanner">
+  <span class="freshness-dot"></span>
+  <span class="freshness-label" id="freshnessLabel"></span>
+  <span id="freshnessMsg" style="opacity:.95"></span>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ACHIEVEMENT BANNER — portfolio hero row
+═══════════════════════════════════════════════════════ -->
+<div class="achieve-banner" id="achieveBanner">
+
+  <div class="ach-section ach-readiness">
+    <div class="ach-eyebrow">Portfolio Coverage</div>
+    <div class="ach-read-row">
+      <div class="ach-read-big" id="achReadBig">—</div>
+      <div class="ach-read-pct" id="achReadPct">—%</div>
+    </div>
+    <div class="ach-read-sub" id="achReadSub">of — total FG SKUs</div>
+  </div>
+
+  <div class="ach-section ach-grades">
+    <div class="ach-eyebrow">Forecast Reliability</div>
+    <div class="ach-grade-chips" id="achGradeChips">
+      <div class="grade-chip Excellent"><div class="gc-count">—</div><div class="gc-label">Excellent</div></div>
+      <div class="grade-chip Good"><div class="gc-count">—</div><div class="gc-label">Good</div></div>
+      <div class="grade-chip Fair"><div class="gc-count">—</div><div class="gc-label">Fair</div></div>
+      <div class="grade-chip Poor"><div class="gc-count">—</div><div class="gc-label">Poor</div></div>
+      <div class="grade-chip Unreliable"><div class="gc-count">—</div><div class="gc-label">Unreliable</div></div>
+    </div>
+  </div>
+
+  <div class="ach-section ach-velocity">
+    <div class="ach-eyebrow">Velocity Distribution</div>
+    <div class="ach-vel-row" id="achVelRow">
+      <span class="vel-cap A">Fast <b>—</b></span>
+      <span class="vel-cap B">Med <b>—</b></span>
+      <span class="vel-cap C">Slow <b>—</b></span>
+      <button class="vel-settings-btn" onclick="openModal()" title="Adjust velocity weights">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="10" y1="4" x2="10" y2="18"/>
+          <line x1="6" y1="18" x2="14" y2="18"/>
+          <line x1="3" y1="7" x2="17" y2="7"/>
+          <path d="M3 7 L1 11 L5 11 Z" fill="currentColor" fill-opacity="0.18"/>
+          <path d="M17 7 L15 11 L19 11 Z" fill="currentColor" fill-opacity="0.18"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- <div class="ach-section ach-batch" style="margin-left:auto">
+    <div class="ach-eyebrow">Last Batch</div>
+    <div class="ach-batch-val" id="achBatchVal">—</div>
+    <div class="ach-batch-sub">Weekly rebuild</div>
+  </div> -->
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     QUICK OVERVIEW — sits just above the action tabs so
+     top-5 inventory / demand / WES new entries are always
+     in view as context before you pick an action bucket
+═══════════════════════════════════════════════════════ -->
+<div class="quickview-area" id="quickviewArea">
+  <div class="qv-header">
+    <span class="qv-header-label">Quick Overview</span>
+    <span class="qv-collapse-btn" id="qvCollapseBtn" onclick="toggleQuickview()">▴ hide</span>
+  </div>
+  <div class="qv-panels" id="qvPanels">
+    <div class="qv-panel">
+      <div class="qv-panel-title">📦 Top 5 by Inventory</div>
+      <div id="qvInventory">—</div>
+    </div>
+    <div class="qv-panel">
+      <div class="qv-panel-title" id="qvOrdersTitle">📋 Top 5 by Pending Qty</div>
+      <div id="qvOrders">—</div>
+    </div>
+    <div class="qv-panel new-entries" id="qvNewPanel" style="display:none">
+      <div class="qv-panel-title">
+        <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3 L10 17 M3 10 L17 10"/></svg>
+        New SKUs <span style="font-weight:500;opacity:.7" id="qvNewCount"></span>
+      </div>
+      <div class="qv-new-entries-scroll" id="qvNewEntries">--</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     PLANNING TOOLBAR — moved above the urgency tabs so the
+     horizon selector is the FIRST interaction available.
+     Picking a horizon here dynamically re-drives the three tile
+     counts below (Need production / Watch / Stock is covered).
+═══════════════════════════════════════════════════════ -->
+<div class="planning-toolbar" id="planningToolbarTop">
+  <span class="toolbar-label">Planning Window</span>
+  <div class="horizon-group">
+    <div class="horizon-btn active" data-w="1" onclick="setHorizon(1)" title="1 week — shift-level planning">1W</div>
+    <div class="horizon-btn" data-w="2" onclick="setHorizon(2)" title="2 weeks — fortnightly">2W</div>
+    <div class="horizon-btn" data-w="4" onclick="setHorizon(4)" title="4 weeks — monthly">4W</div>
+    <div class="horizon-btn" data-w="8" onclick="setHorizon(8)" title="8 weeks — bi-monthly">8W</div>
+    <div class="horizon-btn" data-w="13" onclick="setHorizon(13)" title="13 weeks — quarterly">13W</div>
+  </div>
+  <!-- Working forecast-window picker (moved up from the hidden in-list toolbar
+       so it actually opens). Pick a start date on the calendar; the end date is
+       derived from the selected horizon. -->
+  <div class="date-range-wrap" id="dateRangeWrap">
+    <div class="date-range-btn" id="dateRangeBtn" onclick="toggleDatePicker()" title="Change forecast window">
+      <svg class="drb-cal-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4.5" width="14" height="12" rx="1.6"/>
+        <line x1="3" y1="8.5" x2="17" y2="8.5"/>
+        <line x1="7" y1="3" x2="7" y2="6"/>
+        <line x1="13" y1="3" x2="13" y2="6"/>
+      </svg>
+      <span id="dateRangeLabel">— → —</span>
+      <span class="drb-arrow">▾</span>
+    </div>
+    <div class="date-picker-pop" id="datePop">
+      <div class="dp-title">Forecast Window</div>
+      <div class="dp-fields">
+        <div class="dp-field">
+          <div class="dp-label">Start Date</div>
+          <input type="date" class="dp-input" id="dpFrom" onchange="onDateChange()">
+        </div>
+        <div class="dp-field">
+          <div class="dp-label">End Date <span style="opacity:.5;font-weight:400">(auto)</span></div>
+          <input type="date" class="dp-input" id="dpTo" readonly style="background:var(--bg2);cursor:default">
+        </div>
+      </div>
+      <div class="dp-weeks-label" id="dpWeeksLabel">Select a start date</div>
+      <div class="dp-divider">Duration (horizon buttons control this)</div>
+      <div class="dp-snaps" id="dpSnaps"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-cancel" style="flex:1;padding:6px" onclick="resetDateToDefault()">Reset to Default</button>
+        <button class="btn btn-apply" style="flex:1;padding:6px" onclick="applyDateRange()">Apply ✓</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     URGENCY TABS
+═══════════════════════════════════════════════════════ -->
+<div class="urgency-tabs" id="urgencyTabs">
+  <div class="ut-tab urgent" id="tabUrgent" onclick="activateTab('urgent')">
+    <div class="ut-icon-wrap"><div class="ut-icon"></div></div>
+    <div class="ut-body">
+      <div class="ut-count-row">
+        <div class="ut-count" id="acUrgentCount">—</div>
+        <div class="ut-cta">View →</div>
+      </div>
+      <div class="ut-label">Need production orders</div>
+      <div class="ut-sub">Gap &gt; 50% of forecast</div>
+    </div>
+  </div>
+  <div class="ut-tab watch" id="tabWatch" onclick="activateTab('watch')">
+    <div class="ut-icon-wrap"><div class="ut-icon"></div></div>
+    <div class="ut-body">
+      <div class="ut-count-row">
+        <div class="ut-count" id="acWatchCount">—</div>
+        <div class="ut-cta">View →</div>
+      </div>
+      <div class="ut-label">Worth watching</div>
+      <div class="ut-sub">Borderline, check next cycle</div>
+    </div>
+  </div>
+  <div class="ut-tab ok" id="tabOk" onclick="activateTab('ok')">
+    <div class="ut-icon-wrap"><div class="ut-icon"></div></div>
+    <div class="ut-body">
+      <div class="ut-count-row">
+        <div class="ut-count" id="acOkCount">—</div>
+        <div class="ut-cta">View →</div>
+      </div>
+      <div class="ut-label">Stock is covered</div>
+      <div class="ut-sub">Forecast met, no action</div>
+    </div>
+  </div>
+  <div class="ut-indicator" id="tabIndicator"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     MAIN AREA — landing graphic OR SKU list
+═══════════════════════════════════════════════════════ -->
+<div class="main-area" id="mainArea">
+
+  <!-- LANDING GRAPHIC (visible until a tab is chosen) -->
+  <div class="landing-graphic" id="landingGraphic">
+
+    <div class="lg-ambient">
+      <div class="lg-bar-strip">
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+        <div class="lg-bar"></div>
+      </div>
+    </div>
+    <div class="lg-line-full">
+      <svg viewBox="0 0 1000 200" preserveAspectRatio="none">
+        <path d="M 20,150 Q 80,110 160,120 T 320,70 T 480,95 T 640,55 T 800,80 T 980,40"/>
+      </svg>
+    </div>
+    <div class="lg-scan"></div>
+
+    <div class="lg-cue-panel">
+      <div class="lg-live-row">
+        <span class="lg-live-dot"></span>
+        <span>Engine v7 &middot; 35 models &middot; live</span>
+      </div>
+      <div class="lg-tick-row">
+        <div class="lg-tick">
+          <div class="lg-t-label" id="lgLbl1">Next 1W Demand</div>
+          <div class="lg-t-val" id="lgVal1">2,847 t</div>
+        </div>
+        <div class="lg-tick">
+          <div class="lg-t-label">Reliability</div>
+          <div class="lg-t-val reliab" id="lgVal2">71.6%</div>
+        </div>
+        <div class="lg-tick">
+          <div class="lg-t-label">SKUs Modeled</div>
+          <div class="lg-t-val" id="lgVal3">647</div>
+        </div>
+      </div>
+      <div class="lg-cue-text">
+        Pick <b>Urgent</b>, <b>Watch</b>, or <b>Stock is covered</b> above to load the SKU list
+        <span class="lg-cue-arrow">↑</span>
+      </div>
+      <div class="lg-cue-sub">Or hover a tab to preview counts</div>
+      <div class="lg-mini-chips" id="lgChips">
+        <span class="lg-chip" onclick="pickLanding(0)">1W</span>
+        <span class="lg-chip" onclick="pickLanding(1)">2W</span>
+        <span class="lg-chip" onclick="pickLanding(2)">4W</span>
+        <span class="lg-chip" onclick="pickLanding(3)">8W</span>
+        <span class="lg-chip" onclick="pickLanding(4)">13W</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SLIDE WRAPPER — SKU list swaps in here on tab activate -->
+  <div class="sku-slide-wrap" id="skuSlideWrap" style="display:none">
+        <!-- Open-orders fetch header. Manual refresh only — no timer/auto-refresh.
+         Stamp reads the last SUCCESSFUL fetch; a failed live pull shows the tip
+         below and keeps serving the previous snapshot. -->
+    <div class="oo-fetch-bar" id="ooFetchBar">
+      <div class="oo-fetch-left">
+        <span class="oo-fetch-icon">📋</span>
+        <span class="oo-fetch-label">Open orders</span>
+        <span class="oo-fetch-stamp" id="ooFetchStamp">—</span>
+      </div>
+      <div class="oo-fetch-right">
+        <button class="oo-refresh-btn" id="ooRefreshBtn" onclick="refreshOpenOrders()" title="Fetch latest open orders from NETPET (needs VPN)">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10 A 7 7 0 1 1 10 17"/><polyline points="3,5 3,10 8,10"/></svg>
+          Refresh
+        </button>
+        <div class="oo-tip" id="ooTip" hidden></div>
+      </div>
+    </div><!-- The in-list Planning Window duplicates the always-visible top toolbar
+         now that the horizon selector was moved up. Hidden via .dup-hidden so
+         the search-box row directly follows the tabs; the top toolbar drives
+         setHorizon for the whole page including this list. -->
+    <!-- <div class="toolbar dup-hidden">
+      <span class="toolbar-label">Planning Window</span>
+      <div class="horizon-group">
+        <div class="horizon-btn" data-w="1" onclick="setHorizon(1)" title="1 week — shift-level planning">1W</div>
+        <div class="horizon-btn" data-w="2" onclick="setHorizon(2)" title="2 weeks — fortnightly">2W</div>
+        <div class="horizon-btn active" data-w="4" onclick="setHorizon(4)" title="4 weeks — monthly">4W</div>
+        <div class="horizon-btn" data-w="8" onclick="setHorizon(8)" title="8 weeks — bi-monthly">8W</div>
+        <div class="horizon-btn" data-w="13" onclick="setHorizon(13)" title="13 weeks — quarterly">13W</div>
+      </div>
+       Forecast-window picker moved to the always-visible top planning toolbar. 
+      <div class="tier-filter">
+        <input id="skuSearch" placeholder="Find SKU / description..." oninput="STATE.searchQuery=this.value;renderTable()"
+          style="font-family:var(--mono);font-size:11px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;outline:none;width:185px;margin-right:8px">
+        <div class="tier-filter-btn active" data-t="all" onclick="setTierFilter('all')">All</div>
+        <div class="tier-filter-btn" data-t="A" onclick="setTierFilter('A')">Fast</div>
+        <div class="tier-filter-btn" data-t="B" onclick="setTierFilter('B')">Medium</div>
+        <div class="tier-filter-btn" data-t="C" onclick="setTierFilter('C')">Slow</div>
+        <div class="tier-filter-btn wes-pill" data-t="WES" onclick="setTierFilter('WES')" title="Show only SKUs with real WES/ASRS inventory">WES Live</div>
+      </div>
+    </div> -->
+     <!-- In-list filter row: SKU search + velocity/WES filters. The horizon
+         selector lives only in the top planning toolbar, so it is NOT
+         duplicated here. Visible (no .dup-hidden) so search is always available
+         when the SKU list is shown. -->
+    <div class="toolbar">
+      <span class="toolbar-label">Filter</span>
+      <input id="skuSearch" placeholder="Find SKU / description..." oninput="STATE.searchQuery=this.value;renderTable()"
+        style="font-family:var(--mono);font-size:11px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;outline:none;width:220px">
+      <div class="tier-filter">
+        <div class="tier-filter-btn active" data-t="all" onclick="setTierFilter('all')">All</div>
+        <div class="tier-filter-btn" data-t="A" onclick="setTierFilter('A')">Fast</div>
+        <div class="tier-filter-btn" data-t="B" onclick="setTierFilter('B')">Medium</div>
+        <div class="tier-filter-btn" data-t="C" onclick="setTierFilter('C')">Slow</div>
+        <div class="tier-filter-btn wes-pill" data-t="WES" onclick="setTierFilter('WES')" title="Show only SKUs with real WES/ASRS inventory">WES Live</div>
+      </div>
+    </div>
+    <div class="sku-table-area" id="skuTableArea">
+      <div class="empty-state">Loading SKUs...</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     DETAIL MODAL — overlay for SKU detail
+═══════════════════════════════════════════════════════ -->
+<div class="detail-backdrop" id="detailBackdrop" onclick="hideDetail()"></div>
+<div class="detail-modal" id="detailModal">
+  <div class="detail-empty" id="detailEmpty" style="display:none"></div>
+  <div class="detail-pane" id="detailPane" style="display:flex;flex-direction:column;height:100%;overflow:hidden"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+const API = '{{ base_path }}';
+let STATE = {
+  currentTab: null,            // 'urgent' | 'watch' | 'ok' | null (landing)
+  prevTab: null,               // used to choose slide direction
+  horizon: 1,
+  tierFilter: 'all',
+  wesFilter: false,
+  attentionData: null,
+  selectedSku: null,
+  detailData: null,
+  detailHorizon: null,
+  chartInst: null,
+  analystMode: false,
+  qvCollapsed: false,
+  batchDate: null,
+  customStartDate: null,
+  wmsSkus: new Set(),
+  sort: { col: null, dir: 'desc' },
+  searchQuery: '',
+  openOrders: null,     // { by_sku:{sku:{...}}, last_success, last_fetch }
+  horizonSummary: null, // [{horizon_label,total_forecast_tons,reliability_pct,n_skus_modelled}]
+  ooCache: {},          // per-SKU detail cache for the Order Breakdown card
+  ooExpanded: false,    // is the detail Order Breakdown accordion open
+};
+
+
+const TAB_ORDER = ['urgent', 'watch', 'ok'];
+
+const GRADE_META = {
+  Excellent:    { icon: '⬡', desc: 'Highly reliable — act with full confidence.' },
+  Good:         { icon: '◈', desc: 'Reliable — minor variation expected.' },
+  Fair:         { icon: '◇', desc: 'Moderate reliability — add a small buffer.' },
+  Acceptable:   { icon: '◇', desc: 'Moderate reliability — add a small buffer.' },
+  Poor:         { icon: '△', desc: 'Low reliability — treat as directional only.' },
+  Unreliable:   { icon: '⚠', desc: 'High uncertainty — manual review recommended.' },
+  Unpredictable:{ icon: '⚠', desc: 'High uncertainty — manual review recommended.' },
+};
+
+function normalizeGrade(raw) {
+  if (!raw || raw === '—') return null;
+  const g = raw.trim();
+  if (g === 'Acceptable') return 'Fair';
+  if (g === 'Unpredictable') return 'Unreliable';
+  return g;
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', async () => {
+  syncThemeButtons();
+  await loadReadiness();
+  await Promise.all([loadAttention(), loadExternalInventory(), loadFreshness(), loadOpenOrders(), loadHorizonSummary()]);
+  hide('loadingOverlay');
+  startLandingTicker();
+});
+
+// ═══════════════════════════════════════════════════════
+// THEME (light / system / dark) — persisted to localStorage.
+// FOUC prevention runs in <head>; this handles user toggle
+// and syncs the button pill state.
+// ═══════════════════════════════════════════════════════
+function currentPref() {
+  try { const s = localStorage.getItem('petmaxi-theme'); return ['light','dark','system'].includes(s) ? s : 'system'; }
+  catch(e) { return 'system'; }
+}
+function resolveTheme(pref) {
+  if (pref === 'system') {
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+  return pref;
+}
+function setTheme(pref) {
+  try { localStorage.setItem('petmaxi-theme', pref); } catch(e) {}
+  document.documentElement.setAttribute('data-theme', resolveTheme(pref));
+  syncThemeButtons();
+}
+function syncThemeButtons() {
+  const pref = currentPref();
+  document.querySelectorAll('.tt-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.tt === pref));
+}
+// Reflect live OS theme changes when user picked "system"
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (currentPref() === 'system') {
+      document.documentElement.setAttribute('data-theme', resolveTheme('system'));
+    }
+    if (STATE.detailData && el('detailModal').classList.contains('open')) {
+      requestAnimationFrame(() => { try { renderChart(STATE.detailData); } catch(e){} });
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// API
+// ═══════════════════════════════════════════════════════
+async function api(path) {
+  let r;
+  try {
+    r = await fetch(API + path);
+  } catch (networkErr) {
+    const msg = `Network error on ${path}: ${networkErr.message}`;
+    console.error(msg);
+    logApiError(path, 0, networkErr.message);
+    throw new Error(msg);
+  }
+  if (!r.ok) {
+    let body = '';
+    try { body = await r.text(); } catch(_) {}
+    const msg = `${r.status} ${r.statusText}`;
+    console.error(`API ${path} failed: ${msg}`, body);
+    logApiError(path, r.status, body || msg);
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+// Centralised frontend error logger - shows toast + logs to backend
+const _apiErrorLog = [];
+function logApiError(path, status, detail) {
+  const entry = { ts: new Date().toISOString(), path, status, detail: String(detail).slice(0, 300) };
+  _apiErrorLog.push(entry);
+  if (_apiErrorLog.length > 50) _apiErrorLog.shift(); // ring buffer
+  showToast(`API error: ${path} (${status || 'network'})`, 5000);
+  // Fire-and-forget POST to backend error log endpoint
+  try {
+    fetch(API + '/api/log_error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry)
+    }).catch(() => {}); // silent if backend endpoint not available yet
+  } catch(_) {}
+}
+
+async function loadReadiness() {
+  try {
+    const d = await api('/api/readiness');
+    if (!d.ready) { showToast('Batch not ready — run run_batch.py'); return; }
+    el('achReadBig').textContent = `${d.forecastable} / ${d.total_skus}`;
+    el('achReadSub').textContent = `of ${d.total_skus} total FG SKUs`;
+    el('achReadPct').textContent = `${d.pct_ready}%`;
+    //el('achBatchVal').textContent = d.last_run || '—';
+    // batchBadge removed from header; guard for safety.
+    var _ab = el('achBatchVal'); if (_ab) _ab.textContent = d.last_run || '—';
+    var _bb = el('batchBadge'); if (_bb) _bb.textContent = `Batch · ${d.last_run ? 'Ready' : '—'}`;
+    STATE.batchDate = d.last_run || null;
+    updateDateRangeDisplay();
+
+    const velRow = el('achVelRow');
+    const labels = { A:'Fast', B:'Med', C:'Slow' };
+    const capsHtml = ['A','B','C'].map(t => {
+      const td = d.by_tier[t] || {forecastable:0,total:0};
+      return `<span class="vel-cap ${t}" title="${td.forecastable}/${td.total} forecastable">${labels[t]} <b>${td.forecastable}</b>/${td.total}</span>`;
+    }).join('');
+    velRow.innerHTML = capsHtml + `
+      <button class="vel-settings-btn" onclick="openModal()" title="Adjust velocity weights (Volume vs Frequency)">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="10" y1="4" x2="10" y2="18"/>
+          <line x1="6" y1="18" x2="14" y2="18"/>
+          <line x1="3" y1="7" x2="17" y2="7"/>
+          <path d="M3 7 L1 11 L5 11 Z" fill="currentColor" fill-opacity="0.18"/>
+          <path d="M17 7 L15 11 L19 11 Z" fill="currentColor" fill-opacity="0.18"/>
+        </svg>
+      </button>`;
+  } catch(e) { showToast('Readiness error: ' + e.message); }
+}
+
+async function loadAttention(horizon) {
+  horizon = horizon || STATE.horizon;
+  try {
+    let url = `/api/attention?horizon=${horizon}&top_n=999`;
+    if (STATE.customStartDate) url += `&start_date=${STATE.customStartDate}`;
+    const d = await api(url);
+    STATE.attentionData = d;
+    // Tab counts now follow the SELECTED planning window — picking a horizon
+    // re-buckets Urgent/Watch/OK against that horizon's forecast, same data the
+    // table below renders from.
+    updateBannerCounts(d);
+    updateGradeChips(d);
+    renderQuickView(d);
+    if (STATE.currentTab) renderTable();
+  } catch(e) {
+    if (STATE.currentTab)
+      el('skuTableArea').innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+  }
+}
+
+async function loadFreshness() {
+  try {
+    const d = await api('/api/freshness');
+    if (!d.ready) return;
+    const b = el('freshnessBanner');
+    b.style.display = 'flex';
+    b.style.backgroundColor = d.color;
+    el('freshnessLabel').textContent = d.label;
+    el('freshnessMsg').textContent = d.message;
+  } catch(e) { /* freshness banner is best-effort, never blocks the page */ }
+}
+
+async function loadSkuDetail(sku) {
+  try {
+    const d = await api(`/api/sku/${sku}`);
+    STATE.detailHorizon = null;
+    STATE.ooExpanded = false;   // collapse Order Breakdown for the newly opened SKU
+    try {
+      renderDetail(d);
+    } catch (renderErr) {
+      console.error('renderDetail failed:', renderErr);
+      el('detailPane').innerHTML = `<div style="padding:24px;font-family:var(--mono);font-size:12px;color:var(--red-dark);background:var(--red-bg);border:1px solid var(--red-border);border-radius:8px;margin:16px">
+        <strong>Detail pane failed to render.</strong><br><br>
+        ${renderErr.message}<br><br>
+        <span style="color:var(--muted)">Open the browser console (F12) and copy the full error/stack trace.</span>
+      </div>`;
+      show('detailPane');
+      openDetailModal();
+    }
+  } catch(e) { showToast('Detail error: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════
+// GRADE CHIPS
+// ═══════════════════════════════════════════════════════
+function updateGradeChips(d) {
+  const grades = { Excellent: 0, Good: 0, Fair: 0, Poor: 0, Unreliable: 0 };
+  ['A','B','C'].forEach(t => {
+    const tier = d.tiers[t]; if (!tier) return;
+    const allRows = (tier.attention||[]).concat(tier.sufficient||[]);
+    allRows.forEach(r => {
+      const g = normalizeGrade(r.grade);
+      if (g && grades.hasOwnProperty(g)) grades[g]++;
+    });
+  });
+  el('achGradeChips').innerHTML = Object.entries(grades).map(([g, n]) =>
+    `<div class="grade-chip ${g}" title="${g}: ${n} SKUs">
+      <div class="gc-count">${n}</div>
+      <div class="gc-label">${g}</div>
+    </div>`
+  ).join('');
+}
+
+function updateBannerCounts(d) {
+  let urgent = 0, watch = 0, ok = 0;
+  ['A','B','C'].forEach(t => {
+    const tier = d.tiers[t]; if (!tier) return;
+    (tier.attention||[]).forEach(r => {
+      if (r.urgency==='red') urgent++;
+      else if (r.urgency==='yellow') watch++;
+      else ok++;
+    });
+    ok += tier.sufficient_total;
+  });
+  el('acUrgentCount').textContent = urgent;
+  el('acWatchCount').textContent  = watch;
+  el('acOkCount').textContent     = ok;
+}
+
+// ═══════════════════════════════════════════════════════
+// TAB ACTIVATION (with slide animation)
+// ═══════════════════════════════════════════════════════
+function activateTab(tab) {
+  const prev = STATE.currentTab;
+  if (prev === tab) {
+    // Clicking the active tab collapses back to landing
+    STATE.prevTab = tab;
+    STATE.currentTab = null;
+    ['tabUrgent','tabWatch','tabOk'].forEach(id => el(id).classList.remove('active'));
+    el('tabIndicator').classList.remove('active');
+    el('tabIndicator').removeAttribute('data-tab');
+    show('landingGraphic');
+    hide('skuSlideWrap');
+    hideDetail();
+    return;
+  }
+  STATE.prevTab = prev;
+  STATE.currentTab = tab;
+  STATE.selectedSku = null;
+  hideDetail();
+
+  el('tabUrgent').classList.toggle('active', tab==='urgent');
+  el('tabWatch').classList.toggle('active',  tab==='watch');
+  el('tabOk').classList.toggle('active',     tab==='ok');
+
+  const ind = el('tabIndicator');
+  ind.classList.add('active');
+  ind.setAttribute('data-tab', tab);
+
+  hide('landingGraphic');
+  const wrap = el('skuSlideWrap');
+  wrap.style.display = '';
+  const area = el('skuTableArea');
+  const prevIdx = prev ? TAB_ORDER.indexOf(prev) : -1;
+  const nextIdx = TAB_ORDER.indexOf(tab);
+  const direction = (prevIdx === -1 || nextIdx > prevIdx) ? 'slide-in-right' : 'slide-in-left';
+
+  renderTable();
+  area.classList.remove('slide-in-right', 'slide-in-left');
+  void area.offsetWidth;
+  area.classList.add(direction);
+}
+
+// ═══════════════════════════════════════════════════════
+// TOOLBAR CONTROLS
+// ═══════════════════════════════════════════════════════
+function setHorizon(w) {
+  STATE.horizon = w;
+  STATE.selectedSku = null;
+  hideDetail();
+  document.querySelectorAll('.horizon-btn').forEach(b => b.classList.toggle('active', +b.dataset.w === w));
+  updateDateRangeDisplay();
+  loadAttention(w);
+}
+
+function setTierFilter(t) {
+  if (t === 'WES') {
+    STATE.wesFilter = !STATE.wesFilter;
+    document.querySelectorAll('.tier-filter-btn.wes-pill').forEach(b =>
+      b.classList.toggle('active', STATE.wesFilter));
+  } else {
+    STATE.tierFilter = t;
+    document.querySelectorAll('.tier-filter-btn:not(.wes-pill)').forEach(b =>
+      b.classList.toggle('active', b.dataset.t===t));
+  }
+  if (STATE.currentTab) renderTable();
+}
+
+function toggleAnalystMode() {
+  STATE.analystMode = !STATE.analystMode;
+  el('analystToggle').classList.toggle('on', STATE.analystMode);
+  document.body.classList.toggle('analyst-mode', STATE.analystMode);
+}
+
+// ═══════════════════════════════════════════════════════
+// TABLE RENDER
+// ═══════════════════════════════════════════════════════
+const SORT_ACCESSORS = {
+  sku:       r => (r.sku||'').toLowerCase(),
+  status:    r => ({red:0, yellow:1, green:2}[r.urgency] ?? 3),
+  gap_pct:   r => Math.abs(r.gap_pct||0),
+  grade:     r => ({Excellent:0, Good:1, Fair:2, Poor:3, Unreliable:4}[normalizeGrade(r.grade)] ?? 5),
+  wape:      r => (r.wape ?? Infinity),
+  on_hand:   r => (r.on_hand||0),
+  available: r => (r.available||0),
+  forecast:  r => (r.forecast_total||0),
+  model:     r => (r.best_model||'').toLowerCase(),
+  orders:    r => ooWeight(r.sku),
+};
+
+function sortRows(rows) {
+  if (!STATE.sort.col) return rows;
+  const { col, dir } = STATE.sort;
+  const acc = SORT_ACCESSORS[col] || SORT_ACCESSORS.gap_pct;
+  return [...rows].sort((a, b) => {
+    const av = acc(a), bv = acc(b);
+    const cmp = (typeof av === 'string') ? av.localeCompare(bv) : (av - bv);
+    return dir==='desc' ? -cmp : cmp;
+  });
+}
+
+function applySearchFilter(rows) {
+  const q = (STATE.searchQuery||'').trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter(r => (r.sku||'').toLowerCase().includes(q) ||
+                          (r.description||'').toLowerCase().includes(q));
+}
+
+function setSort(col) {
+  if (STATE.sort.col===col) STATE.sort.dir = STATE.sort.dir==='desc'?'asc':'desc';
+  else { STATE.sort.col=col; STATE.sort.dir='desc'; }
+  renderTable();
+}
+
+function renderTable() {
+  if (!STATE.attentionData || !STATE.currentTab) return;
+  const { tiers } = STATE.attentionData;
+  const tList = (STATE.tierFilter==='all' || STATE.tierFilter==='WES') ? ['A','B','C'] : [STATE.tierFilter];
+  const tierLabels = { A:'Fast Movers', B:'Medium Movers', C:'Slow Movers' };
+  const tierSubs   = { A:'High velocity', B:'Regular velocity', C:'Low velocity' };
+  const targetUrgMap = { urgent:'red', watch:'yellow', ok:'green' };
+  const targetUrg = targetUrgMap[STATE.currentTab];
+  const isPlanning = STATE.currentTab === 'urgent' || STATE.currentTab === 'watch';
+
+  let html = '';
+  tList.forEach(t => {
+    const tier = tiers[t]; if (!tier) return;
+    // Combined pool: attention + sufficient (sufficient rows have no urgency set — treat as 'green')
+    const combined = (tier.attention||[]).concat((tier.sufficient||[]).map(r => ({...r, urgency:r.urgency||'green'})));
+    let rows = combined.filter(r => (r.urgency||'green') === targetUrg);
+    rows = applySearchFilter(sortRows(rows));
+    if (STATE.wesFilter) rows = rows.filter(r => STATE.wmsSkus.has(r.sku) && isWesTag(r.source_tag));
+    if (!rows.length) return;
+
+    const statLabel = STATE.currentTab==='urgent' ? 'urgent' :
+                      STATE.currentTab==='watch'  ? 'watching' : 'covered';
+    const statClass = STATE.currentTab==='urgent' ? 'red' :
+                      STATE.currentTab==='watch'  ? 'yellow' : 'green';
+
+    html += `
+    <div class="tier-block" id="tier-${t}">
+      <div class="tier-block-header" onclick="toggleTier('${t}')">
+        <div class="tier-badge ${t}">${t}</div>
+        <div><div class="tier-title">${tierLabels[t]}</div><div class="tier-subtitle">${tierSubs[t]}</div></div>
+        <div class="tier-stats">
+          <span class="tier-stat"><span class="n ${statClass}">${rows.length}</span> ${statLabel}</span>
+        </div>
+        <span class="tier-chevron">▾</span>
+      </div>
+      <div class="tier-content" id="tier-content-${t}">
+        <div class="sku-table-wrap">
+          <table class="sku-tbl">
+            <thead><tr>
+              <th class="col-sku sortable ${STATE.sort.col==='sku'?'sort-'+STATE.sort.dir:''}" onclick="setSort('sku')">Product ⇅</th>
+              <th class="col-status sortable ${STATE.sort.col==='status'?'sort-'+STATE.sort.dir:''}" onclick="setSort('status')">Status ⇅</th>
+              <th class="col-need sortable ${STATE.sort.col==='gap_pct'?'sort-'+STATE.sort.dir:''}" onclick="setSort('gap_pct')">${isPlanning?'Need to Produce ⇅':'Surplus / Gap ⇅'}</th>
+              <th class="col-conf sortable ${STATE.sort.col==='grade'?'sort-'+STATE.sort.dir:''}" onclick="setSort('grade')">Forecast Reliability ⇅</th>
+              <th class="col-orders sortable ${STATE.sort.col==='orders'?'sort-'+STATE.sort.dir:''}" onclick="setSort('orders')" title="Committed open-order weight (tons) from NETPET">Open Orders ⇅</th>
+              <th class="col-num analyst-col sortable ${STATE.sort.col==='on_hand'?'sort-'+STATE.sort.dir:''}" style="text-align:right" onclick="setSort('on_hand')">On Hand ⇅</th>
+              <th class="col-num analyst-col sortable ${STATE.sort.col==='available'?'sort-'+STATE.sort.dir:''}" style="text-align:right" onclick="setSort('available')">Available ⇅</th>
+              <th class="col-num analyst-col sortable ${STATE.sort.col==='forecast'?'sort-'+STATE.sort.dir:''}" style="text-align:right" onclick="setSort('forecast')">Forecast ⇅</th>
+              <th class="col-gap analyst-col sortable ${STATE.sort.col==='gap_pct'?'sort-'+STATE.sort.dir:''}" onclick="setSort('gap_pct')">Gap %</th>
+              <th class="col-wape analyst-col sortable ${STATE.sort.col==='wape'?'sort-'+STATE.sort.dir:''}" onclick="setSort('wape')">WAPE ⇅</th>
+              <th class="col-model analyst-col sortable ${STATE.sort.col==='model'?'sort-'+STATE.sort.dir:''}" onclick="setSort('model')">Model ⇅</th>
+            </tr></thead>
+            <tbody>${rows.map(r => renderRow(r)).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  if (!html) html = '<div class="empty-state">No SKUs in this bucket for the current filters.</div>';
+  el('skuTableArea').innerHTML = html;
+  if (STATE.selectedSku)
+    document.querySelectorAll(`[data-sku="${STATE.selectedSku}"]`).forEach(r=>r.classList.add('selected'));
+}
+
+function renderRow(r) {
+  const urgency  = r.urgency || 'green';
+  const urgMap   = { red:'urgent', yellow:'watch', green:'ok' };
+  const urgLabel = { red:'Urgent', yellow:'Watch', green:'OK' };
+  const sc = urgMap[urgency], sl = urgLabel[urgency];
+
+  const gap      = r.gap || 0;
+  const needVal  = gap > 0 ? `+${fmt(gap)}t` : gap < 0 ? `${fmt(gap)}t surplus` : '—';
+  const needClr  = urgency==='red' ? 'red' : urgency==='yellow' ? 'yellow' : 'green';
+
+  const grade    = normalizeGrade(r.grade);
+  const isWms    = STATE.wmsSkus.has(r.sku);
+  const gradeEl  = grade
+    ? `<span class="conf-grade ${grade}">${GRADE_META[grade]?.icon||''} ${grade}</span>
+       <span class="conf-sub">WAPE ${r.wape?.toFixed(1)}%</span>`
+    : `<span style="color:var(--muted2);font-size:11px">—</span>`;
+
+  const gapPct   = r.gap_pct || 0;
+  const barW     = Math.min(Math.abs(gapPct), 100);
+  const wapeClass= r.wape==null?'':r.wape<30?'good':r.wape<55?'ok':'poor';
+  const modelCls = ['arima','sarima','ets'].includes(r.best_model) ? r.best_model : '';
+  const selected = STATE.selectedSku===r.sku ? ' selected' : '';
+
+  return `<tr class="sku-row${selected}" data-sku="${r.sku}" onclick="selectSku('${r.sku}')">
+    <td class="col-sku">
+      <div class="sku-cell-name">${r.sku}</div>
+      <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
+        <div class="sku-cell-desc" title="${r.description||''}">${r.description||''}</div>
+        ${isWms ? `<span class="wms-tag">ASRS</span>` : ''}
+      </div>
+    </td>
+    <td class="col-status"><span class="status-pill ${sc}"><span class="status-dot"></span>${sl}</span></td>
+    <td class="col-need">
+      <div class="need-cell">
+        <span class="need-val ${needClr}">${needVal}</span>
+        <span class="need-sub">vs ${fmt(r.available)}t available</span>
+      </div>
+    </td>
+    <td class="col-conf"><div class="conf-cell">${gradeEl}</div></td>
+    <td class="col-orders">${(() => { const a = ooAgg(r.sku); return a && a.n_orders ? `<div class="oo-cell"><span class="oo-cell-w">${fmt(a.weight_ton_total)}t</span><span class="oo-cell-sub">${a.n_orders} order${a.n_orders!==1?'s':''}</span></div>` : `<span class="oo-cell-none">—</span>`; })()}</td>
+    <td class="col-num mono analyst-col" style="text-align:right">${fmt(r.on_hand)}</td>
+    <td class="col-num mono analyst-col" style="text-align:right">${fmt(r.available)}</td>
+    <td class="col-num mono analyst-col" style="text-align:right"><strong>${fmt(r.forecast_total)}</strong></td>
+    <td class="col-gap analyst-col">
+      <div class="gap-bar-row">
+        <div class="gap-track"><div class="gap-fill ${urgency}" style="width:${barW}%"></div></div>
+        <span class="gap-pct-txt ${urgency}">${gapPct>0?'+':''}${gapPct.toFixed(1)}%</span>
+      </div>
+    </td>
+    <td class="col-wape analyst-col"><span class="wape-badge ${wapeClass}">${r.wape!=null ? r.wape.toFixed(1)+'%' : '—'}</span></td>
+    <td class="col-model analyst-col"><span class="model-tag ${modelCls}">${r.best_model||'—'}</span></td>
+  </tr>`;
+}
+
+function toggleTier(t) {
+  const block = el(`tier-${t}`);
+  block.classList.toggle('collapsed');
+  el(`tier-content-${t}`).style.display = block.classList.contains('collapsed') ? 'none' : '';
+}
+
+// ═══════════════════════════════════════════════════════
+// DETAIL MODAL
+// ═══════════════════════════════════════════════════════
+function selectSku(sku) {
+  document.querySelectorAll('.sku-row.selected').forEach(r=>r.classList.remove('selected'));
+  document.querySelectorAll('[data-qsku]').forEach(r=>r.classList.remove('selected'));
+  STATE.selectedSku = sku;
+  document.querySelectorAll(`[data-sku="${sku}"]`).forEach(r=>r.classList.add('selected'));
+  document.querySelectorAll(`[data-qsku="${sku}"]`).forEach(r=>r.classList.add('selected'));
+  loadSkuDetail(sku);
+}
+
+function openDetailModal() {
+  el('detailModal').classList.add('open');
+  el('detailBackdrop').classList.add('open');
+}
+function hideDetail() {
+  if (STATE.chartInst) { STATE.chartInst.destroy(); STATE.chartInst = null; }
+  el('detailModal').classList.remove('open');
+  el('detailBackdrop').classList.remove('open');
+  STATE.selectedSku = null;
+  document.querySelectorAll('.sku-row.selected').forEach(r=>r.classList.remove('selected'));
+  document.querySelectorAll('[data-qsku]').forEach(r=>r.classList.remove('selected'));
+}
+
+// Close modal on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && el('detailModal').classList.contains('open')) hideDetail();
+});
+
+function renderHorizonRefs(d) {
+  const parts = [];
+  if (d.best_horizon)
+    parts.push(`Best: <strong>${d.best_horizon.horizon_label}</strong> (${d.best_horizon.wape}% WAPE · ${d.best_horizon.model||''})`);
+  if (d.priority_horizon && (!d.best_horizon || d.priority_horizon.horizon_days !== d.best_horizon.horizon_days))
+    parts.push(`Priority: <strong>${d.priority_horizon.horizon_label}</strong> (${d.priority_horizon.wape}% WAPE)`);
+  if (!parts.length) return '';
+  return `<div style="display:flex;gap:16px;flex-wrap:wrap;margin:8px 0 2px;font-family:var(--mono);font-size:10.5px;color:var(--muted)">${parts.map(p=>`<span>${p}</span>`).join('')}</div>`;
+}
+
+function renderCapsules(d, effH) {
+  const caps = [];
+  const daily = d.daily_forecasts || {};
+  [['2D',2],['3D',3]].forEach(([lbl,k]) => {
+    if (daily[k]) caps.push({key:lbl, lbl, extra:false});
+  });
+  [1,2,4].forEach(h => { if (d.forecasts[h]) caps.push({key:h, lbl:`${h}W`, extra:false}); });
+  const extras = new Set();
+  [d.best_horizon, d.priority_horizon].forEach(ref => {
+    if (!ref) return;
+    const w = {7:1,14:2,28:4,56:8,91:13}[ref.horizon_days];
+    if (w && ![1,2,4].includes(w) && d.forecasts[w]) extras.add(w);
+  });
+  extras.forEach(w => caps.push({key:w, lbl:`${w}W ★`, extra:true}));
+  // NOTE — using a dedicated class .dh-hz-cap so the active state can be styled
+  // via the stylesheet (theme-aware) instead of inline. Previous inline
+  // 'background:var(--g800);color:#fff' was low-contrast in dark mode because
+  // --g800 flips to a pale blue there.
+  return `<div class="dh-hz-caps">
+    ${caps.map(c => `<span onclick="setDetailHorizon(${typeof c.key==='string'?`'${c.key}'`:c.key})"
+      class="dh-hz-cap ${c.key===effH ? 'active' : (c.extra ? 'extra' : '')}">${c.lbl}</span>`).join('')}
+  </div>`;
+}
+
+function setDetailHorizon(h) {
+  STATE.detailHorizon = h;
+  if (STATE.detailData) renderDetail(STATE.detailData);
+}
+
+function renderDetail(d) {
+  const pane = el('detailPane');
+  STATE.detailData = d;
+
+  const effH   = STATE.detailHorizon ?? STATE.horizon;
+  const isDaily= effH === '2D' || effH === '3D';
+  const hLbl   = isDaily ? effH : `${effH}W`;
+  const fc4    = isDaily ? (d.daily_forecasts?.[effH==='2D'?2:3] || {})
+                         : (d.forecasts[effH] || d.forecasts[4] || {});
+  // const avail  = d.inventory.available;
+  // const fcTot  = fc4.forecast_total || 0;
+  // const gap4   = fcTot - avail;
+  // const gap4p  = fcTot > 0 ? (gap4/fcTot*100) : 0;
+  const avail  = d.inventory.available;
+  const oo     = d.inventory.open_order_tons || 0;      // pending open-order tonnes (NETPET)
+  const fcTot  = fc4.forecast_total || 0;
+  const gap4   = fcTot + oo - avail;                    // demand = forecast + open orders
+  const gap4p  = (fcTot + oo) > 0 ? (gap4/(fcTot + oo)*100) : 0;
+  let urgCls   = 'ok';
+  if (gap4p > 50) urgCls = 'urgent';
+  else if (gap4p > 20) urgCls = 'watch';
+  if (isDaily && fc4.gated) urgCls = 'watch';
+
+  const tierLbl = { A:'Fast Mover', B:'Medium Mover', C:'Slow Mover' }[d.velocity?.tier] || '';
+  const modelCls= ['arima','sarima','ets'].includes(fc4.best_model) ? 'ml' : '';
+
+  const grade    = normalizeGrade(fc4.grade);
+  const gradeHtml = grade ? (() => {
+    const m = GRADE_META[grade];
+    // Inline pill: colored border + text only, transparent bg. Placed inline near SKU code.
+    return `<span class="fc-grade-pill grade-${grade}" title="${m.desc}">${m.icon} ${grade} · WAPE ${fc4.wape?.toFixed(1)}%</span>`;
+  })() : '';
+
+  let heroHtml = '';
+  if (isDaily && fc4.gated) {
+    heroHtml = `Forecast reliability at ${hLbl} is below the usable threshold for this SKU.
+      <span class="hero-produce">→ No number shown, use a weekly window instead</span>`;
+  // } else if (gap4 > 0) {
+  //   heroHtml = `You have <strong>${fmt(avail)}t</strong> available. The ${hLbl} forecast is <strong>${fmt(fcTot)}t</strong>.
+  //     <span class="hero-produce">→ Produce ~${fmt(gap4)}t</span>`;
+  } else if (gap4 > 0) {
+  heroHtml = `You have <strong>${fmt(avail)}t</strong> available against ${hLbl} demand of <strong>${fmt(fcTot + oo)}t</strong> (${fmt(fcTot)}t forecast + ${fmt(oo)}t open orders).
+    <span class="hero-produce">→ Produce ~${fmt(gap4)}t</span>`;
+  // } else if (gap4 < 0) {
+  //   heroHtml = `You have <strong>${fmt(avail)}t</strong> available against a forecast of <strong>${fmt(fcTot)}t</strong>.
+  //     <span class="hero-produce">→ Surplus of ~${fmt(Math.abs(gap4))}t, no action needed</span>`;
+  // }
+  } else if (gap4 < 0) {
+  heroHtml = `You have <strong>${fmt(avail)}t</strong> available against ${hLbl} demand of <strong>${fmt(fcTot + oo)}t</strong> (${fmt(fcTot)}t forecast + ${fmt(oo)}t open orders).
+    <span class="hero-produce">→ Surplus of ~${fmt(Math.abs(gap4))}t, no action needed</span>`;
+}else {
+    heroHtml = `Available stock matches the ${hLbl} forecast of <strong>${fmt(fcTot)}t</strong>.
+      <span class="hero-produce">→ No production needed</span>`;
+  }
+
+  const conv = d.conversions || {};
+  const toSacks  = t => conv.sack_weight_kg ? fmt(t*1000/conv.sack_weight_kg) : '<span style="color:var(--muted2)">n/a</span>';
+  const toPallets= t => conv.kg_per_pallet_wes ? fmt(t*1000/conv.kg_per_pallet_wes) : '<span style="color:var(--muted2)">n/a</span>';
+  const hRows = [1,2,4,8,13].map(h => {
+    const f = d.forecasts[h]; if (!f) return '';
+    //const g = f.forecast_total - avail;
+    const g = f.forecast_total + oo - avail;
+    return `<tr class="${(!isDaily && h===effH)?' h-active':''}" style="cursor:pointer" onclick="setDetailHorizon(${h})">
+      <td>${h}W${h===2?' · 2wk':h===4?' · 1M':h===8?' · 2M':h===13?' · 3M':''}</td>
+      <td>${fmt(f.forecast_total)}t</td>
+      <td class="mono">${toSacks(f.forecast_total)}</td>
+      <td class="mono">${toPallets(f.forecast_total)}</td>
+      <td class="h-gap ${g>0?'pos':'neg'}">${g>0?'+':''}${fmt(g)}t</td>
+      <td>${f.wape?.toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+
+  const rmRows = (d.rm_requirements||[]).map(r =>
+    `<tr>
+      <td><div class="rm-name">${r.rm_name}</div><div class="rm-code">${r.rm_sku}</div></td>
+      <td class="mono" style="text-align:right">${r.ton_per_1000kg.toFixed(1)}</td>
+      <td class="mono" style="text-align:right">${fmt(r.rm_forecast)}t</td>
+    </tr>`).join('');
+  const rmTot = (d.rm_requirements||[]).reduce((s,r)=>s+r.rm_forecast,0);
+
+  pane.innerHTML = `
+  <div class="detail-head">
+    <div class="dh-top">
+      <div class="dh-meta">
+        <div class="dh-sku">${d.sku} · ${tierLbl} ${gradeHtml}</div>
+        <div class="dh-name">${d.description}</div>
+      </div>
+      <div class="dh-close" onclick="hideDetail()">✕</div>
+    </div>
+    ${renderHorizonRefs(d)}
+    ${renderCapsules(d, effH)}
+        <div class="action-hero ${urgCls}">${heroHtml}</div>
+    <div id="ooKpiSlot"></div>
+    <div class="dh-tags">
+      ${d.family?`<span class="dh-tag">${d.family}</span>`:''}
+      ${isWesTag(d.inventory?.source_tag)?`<span class="wms-tag" style="padding:3px 8px;font-size:10.5px">WES · ASRS</span>`:''}
+      ${fc4.best_model?`<span class="dh-tag ${modelCls}">${fc4.best_model}</span>`:''}
+    </div>
+    <button class="oo-open-btn ${STATE.ooExpanded?'open':''}" id="ooOpenBtn" onclick="toggleOrderBreakdown()" hidden>
+      <span class="oo-open-caret">▸</span> <span>Order Breakdown</span> <span id="ooOpenCount"></span>
+    </button>
+  </div>
+  <div class="detail-body">
+
+    <div class="ds oo-section" id="ooSection" hidden>
+      <div class="ds-title">Order Breakdown</div>
+      <div style="color:var(--muted);font-size:12px">Loading open orders…</div>
+    </div>
+
+    <div class="ds">
+      <div class="ds-title">Inventory Breakdown</div>
+      <div class="inv-grid">
+        <div class="inv-card">
+          <div class="ic-label">On Hand</div>
+          <div class="ic-val">${fmt(d.inventory.on_hand)}</div>
+          <div class="ic-unit">tons</div>
+        </div>
+        <div class="inv-card">
+          <div class="ic-label">Allocated</div>
+          <div class="ic-val">${fmt(d.inventory.allocated)}</div>
+          <div class="ic-unit">tons</div>
+        </div>
+        <div class="inv-card">
+          <div class="ic-label">Available</div>
+          <div class="ic-val">${fmt(d.inventory.available)}</div>
+          <div class="ic-unit">tons</div>
+        </div>
+      </div>
+      ${gap4 > 0 ? `
+      <div class="prod-needed-card">
+        <div>
+          <div class="pnc-label">Production Needed · ${hLbl}</div>
+          <div class="pnc-val">+${fmt(gap4)}t</div>
+        </div>
+        <div class="pnc-right">Production<br>order needed</div>
+      </div>` : ''}
+    </div>
+
+    <div class="ds">
+      <div class="ds-title">Forecast by Planning Window</div>
+      <table class="horizon-tbl">
+        <thead><tr><th>Window</th><th>Forecast</th><th title="tons x 1000 / sack weight (SKU_FAMILY)">QTsacs</th><th title="derived from WES snapshot avg pallet weight, not confirmed packaging spec">Pallets*</th><th>To Produce</th><th>WAPE</th></tr></thead>
+        <tbody>${hRows}</tbody>
+      </table>
+    </div>
+
+    <div class="ds">
+      <div class="ds-title">Forecast Outlook — ${hLbl} Window</div>
+      <div class="chart-wrap"><canvas id="detailChart"></canvas></div>
+    </div>
+
+    ${rmRows ? `
+    <div class="ds">
+      <div class="ds-title">Raw Materials Needed · ${hLbl}</div>
+      <table class="rm-tbl">
+        <thead><tr>
+          <th>Raw Material</th>
+          <th style="text-align:right">kg / 1000kg FG</th>
+          <th style="text-align:right">Required</th>
+        </tr></thead>
+        <tbody>
+          ${rmRows}
+          <tr class="rm-total">
+            <td colspan="2">Total RM for ${fmt(fcTot)}t production</td>
+            <td style="text-align:right">~${fmt(rmTot)}t</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>` : `
+    <div class="ds">
+          <div class="ds-title">Raw Materials</div>
+      <div style="color:var(--muted);font-size:12px;font-weight:500">No formula mapping found for this SKU.</div>
+    </div>`}
+
+
+  </div>`;
+
+  openDetailModal();
+  renderOrderBreakdown(d.sku);
+  requestAnimationFrame(() => {
+    try { renderChart(d); }
+    catch (chartErr) {
+      console.error('renderChart failed:', chartErr);
+      const canvas = el('detailChart');
+      if (canvas) canvas.parentElement.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--red-dark);font-family:var(--mono);font-size:11px;text-align:center;padding:0 16px">Chart error: ${chartErr.message}</div>`;
+    }
+  });
+}
+
+function renderChart(d) {
+  if (STATE.chartInst) { STATE.chartInst.destroy(); STATE.chartInst = null; }
+  const canvas = el('detailChart');
+  if (!canvas) return;
+  if (typeof Chart === 'undefined') {
+    canvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-family:var(--mono);font-size:11px">Chart library not loaded, check static/chart.umd.min.js on the server</div>';
+    return;
+  }
+  const effH = STATE.detailHorizon ?? STATE.horizon;
+  const isDaily = effH === '2D' || effH === '3D';
+  const fc = isDaily ? (d.daily_forecasts?.[effH==='2D'?2:3] || {})
+                     : (d.forecasts[effH] || d.forecasts[4] || {});
+  const fcDates  = (isDaily && fc.gated) ? [] : (fc.forecast_dates  || []);
+  const fcValues = (isDaily && fc.gated) ? [] : (fc.forecast_values || []);
+  const avail    = d.inventory.available;
+  if (isDaily && fc.gated) {
+    canvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-family:var(--mono);font-size:11px;font-style:italic">insufficient reliability at this window, no forecast shown</div>';
+    return;
+  }
+
+  STATE.chartInst = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: fcDates,
+      datasets: [{
+        label: `Forecast (${isDaily ? effH : effH+'W'})`,
+        data: fcValues,
+        borderColor: cssVar('--g700', '#990000'),
+        backgroundColor: 'rgba(238,49,36,.12)',
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointBackgroundColor: cssVar('--g600', '#EE3124'),
+        tension: 0.35, fill: true,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `Forecast: ${ctx.parsed.y.toFixed(2)}t`,
+            afterBody: () => [`Available now: ${avail.toFixed(1)}t`]
+          }
+        }
+      },
+      scales: {
+        x: { ticks:{ font:{family:'JetBrains Mono',size:9}, maxTicksLimit:6, color: cssVar('--muted', '#56694a')}, grid:{color: cssVar('--border2', '#e0efcc')} },
+        y: { ticks:{ font:{family:'JetBrains Mono',size:9}, color: cssVar('--muted', '#56694a')}, grid:{color: cssVar('--border2', '#e0efcc')}, beginAtZero:true }
+      }
+    }
+  });
+}
+
+// Read a CSS custom property; return fallback if empty (e.g. before mount)
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+// ═══════════════════════════════════════════════════════
+// SETTINGS MODAL
+// ═══════════════════════════════════════════════════════
+function openModal()  { el('abcModal').classList.add('open'); }
+function closeModal() { el('abcModal').classList.remove('open'); }
+
+function updateWeights() {
+  const v = +el('volWeight').value/100, f = +el('freqWeight').value/100;
+  el('volWeightVal').textContent = v.toFixed(2);
+  el('freqWeightVal').textContent = f.toFixed(2);
+  const sum = +(v+f).toFixed(2), ok = Math.abs(sum-1)<.01;
+  el('weightSum').className = 'modal-sum '+(ok?'ok':'err');
+  el('weightSum').textContent = ok ? `✓ Weights sum to ${sum}` : `✗ Sum is ${sum}, must equal 1.0`;
+  el('applyWeightsBtn').disabled = !ok;
+}
+
+async function applyWeights() {
+  const v = +el('volWeight').value/100, f = +el('freqWeight').value/100;
+  try {
+    const r = await fetch(API+'/api/abc_weights', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({weight_volume:v, weight_frequency:f})
+    });
+
+    // Try to parse JSON, but fall back to raw text if the server returned
+    // something else (an HTML traceback page, 502 gateway body, etc.).
+    let d = null, raw = null;
+    try { d = await r.clone().json(); }
+    catch(_) { raw = await r.text(); }
+
+    if (!r.ok) {
+      const msg = (d && (d.error || d.message)) ||
+                  (raw && raw.slice(0, 180)) ||
+                  `HTTP ${r.status} ${r.statusText}`;
+      console.error('abc_weights failed:', { status: r.status, body: d || raw });
+      showToast(`HTTP ${r.status}: ${msg}`, 7000);
+      return;
+    }
+
+    if (d && d.success) {
+      const oldTiers = {};
+      if (STATE.attentionData) ['A','B','C'].forEach(t => {
+        const tier = STATE.attentionData.tiers[t];
+        if (tier) (tier.attention||[]).concat(tier.sufficient||[]).forEach(r => { oldTiers[r.sku]=t; });
+      });
+      closeModal();
+      await loadReadiness();
+      await loadAttention();
+      let moved = 0;
+      if (STATE.attentionData) ['A','B','C'].forEach(t => {
+        const tier = STATE.attentionData.tiers[t];
+        if (tier) (tier.attention||[]).concat(tier.sufficient||[]).forEach(r => {
+          if (oldTiers[r.sku] && oldTiers[r.sku]!==t) moved++;
+        });
+      });
+      showToast(`Tiers rebuilt · ${moved} SKUs changed tier`, 4000);
+      return;
+    }
+
+    // 200-OK but success=false or malformed — surface everything we have
+    const detail = d ? JSON.stringify(d).slice(0, 200) : (raw||'').slice(0, 200);
+    console.error('abc_weights returned success=false or unexpected payload:', d || raw);
+    showToast(`API returned: ${detail || 'empty body'}`, 7000);
+
+  } catch(e) {
+    console.error('abc_weights fetch threw:', e);
+    showToast('Request failed: ' + e.message, 6000);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// NEW SKUs (in open orders but not in forecast DB)
+// ═══════════════════════════════════════════════════════
+async function loadExternalInventory() {
+  try {
+    const d = await api('/api/new_skus');
+    if (!d.ready || !d.items?.length) return;
+    const panel = el('qvNewPanel');
+    panel.style.display = '';
+    el('qvNewCount').textContent = `${d.items.length} SKUs`;
+    el('qvNewEntries').innerHTML = d.items.map(r => `
+      <div class="qv-new-row">
+        <div class="qv-new-icon">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M10 4 L10 16 M4 10 L16 10"/></svg>
+        </div>
+        <span class="qv-new-sku" title="${r.sku}">${r.sku}</span>
+        <span class="qv-new-val">${r.pending_total.toLocaleString()} pending</span>
+        <span class="qv-new-note">${r.n_orders} order${r.n_orders!==1?'s':''}</span>
+      </div>`).join('');
+  } catch(e) { console.warn('loadExternalInventory (new_skus):', e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// OPEN ORDERS (NETPET) — paste this whole block into dashboard_v7_ab.html
+// immediately AFTER the closing brace of loadExternalInventory() (see patch
+// step 10). Covers: SKU-list column lookups, the fetch/refresh header, and the
+// detail-modal Order Breakdown card. No new colors — existing tokens only.
+// ══════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
+// OPEN ORDERS (NETPET) — SKU-list column, fetch header, detail breakdown card
+// ══════════════════════════════════════════════════════════════════════════
+
+function ooAgg(sku)    { return (STATE.openOrders && STATE.openOrders.by_sku) ? STATE.openOrders.by_sku[sku] : null; }
+function ooWeight(sku) { const a = ooAgg(sku); return a ? (a.weight_ton_total || 0) : 0; }
+
+function formatDateTimeUTC(iso) {
+  if (!iso) return 'never';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return 'unknown';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
+    + ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
+    + ' UTC';
+}
+
+async function loadOpenOrders() {
+  try {
+    const d = await api('/api/open_orders');
+    STATE.openOrders = d && d.ready ? d : { by_sku: {}, last_success: null };
+    updateOoStamp();
+    if (STATE.currentTab) renderTable();   // re-render if list already showing
+  } catch (e) {
+    console.error('loadOpenOrders failed:', e);
+    STATE.openOrders = { by_sku: {}, last_success: null };
+    updateOoStamp();
+  }
+}
+
+function updateOoStamp() {
+  const stamp = el('ooFetchStamp');
+  if (!stamp) return;
+  const ls = STATE.openOrders && STATE.openOrders.last_success;
+  if (!ls) { stamp.textContent = 'not fetched yet'; return; }
+  const isDemo = (ls.source === 'fixture' || ls.source === 'fixture-seed');
+  stamp.textContent = `${formatDateTimeUTC(ls.fetched_at)} · ${ls.n_orders} orders${isDemo ? ' · demo data' : ''}`;
+}
+
+async function refreshOpenOrders() {
+  const btn = el('ooRefreshBtn'), tip = el('ooTip');
+  if (btn) btn.classList.add('loading');
+  if (btn) btn.disabled = true;
+  if (tip) tip.hidden = true;
+  try {
+    const r = await fetch(API + '/api/open_orders/refresh', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'live' })
+    });
+    const d = await r.json();
+    // Also refresh inventory in the same click so the SKU card's stock and the
+    // production gap move together (both are live from NETPET). Best-effort:
+    // an inventory hiccup never blocks the open-orders result we already have.
+    let inv = null;
+    try {
+      const ir = await fetch(API + '/api/inventory/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'live' })
+      });
+      inv = await ir.json();
+    } catch (e) { /* inventory refresh is best-effort */ }
+    if (d && d.ok) {
+      await loadOpenOrders();
+      await loadExternalInventory();
+      if (STATE.selectedSku) { STATE.ooCache = {}; loadSkuDetail(STATE.selectedSku); }
+      const invMsg = (inv && inv.ok) ? ` · inventory ${inv.n_rows} rows` : '';
+      showToast(`Open orders updated · ${d.n_orders} orders${invMsg}`, 3000);
+    } else {
+      showOoTip(d && d.last_success ? d.last_success.fetched_at : null, (d && d.error) ? d.error : 'API returned an error');
+    }
+  } catch (e) {
+    showOoTip(STATE.openOrders && STATE.openOrders.last_success ? STATE.openOrders.last_success.fetched_at : null, (e && e.message) ? e.message : 'No response from API');
+  } finally {
+    if (btn) { btn.classList.remove('loading'); btn.disabled = false; }
+  }
+}
+
+function showOoTip(lastIso, msg) {
+  const tip = el('ooTip');
+  if (!tip) return;
+  let detail = msg ? String(msg) : 'No response from API';
+  if (detail.length > 180) detail = detail.slice(0, 179) + '…';
+  const tail = lastIso ? ` Showing last fetch from ${formatDateTimeUTC(lastIso)}.` : '';
+  tip.textContent = `Refresh failed: ${detail}.${tail}`;
+  tip.hidden = false;
+  clearTimeout(STATE._ooTipTimer);
+  STATE._ooTipTimer = setTimeout(() => { tip.hidden = true; }, 8000);
+}
+
+// ── Detail modal · Order Breakdown card ────────────────────────────────────
+function toggleOrderBreakdown() {
+  STATE.ooExpanded = !STATE.ooExpanded;
+  const sec = el('ooSection'), btn = el('ooOpenBtn');
+  if (sec) sec.hidden = !STATE.ooExpanded;
+  if (btn) btn.classList.toggle('open', STATE.ooExpanded);
+  if (STATE.ooExpanded && sec) sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function renderOrderBreakdown(sku) {
+  // KPI cards render into the HEAD (always visible, next to the produce prompt);
+  // the per-order table renders into the BODY accordion (toggled by the button).
+  const kpiSlot = el('ooKpiSlot');   // head
+  const sec     = el('ooSection');   // body accordion
+  const btn     = el('ooOpenBtn');
+  if (!kpiSlot && !sec) return;
+
+  let data = STATE.ooCache[sku];
+  if (!data) {
+    try {
+      data = await api(`/api/sku/${sku}/open_orders`);
+      STATE.ooCache[sku] = data;
+    } catch (e) {
+      if (kpiSlot) kpiSlot.innerHTML = '';
+      if (btn) btn.hidden = true;
+      if (sec) sec.innerHTML = `<div class="ds-title">Order Breakdown</div>
+        <div style="color:var(--red-dark);font-size:12px">Could not load open orders: ${e.message}</div>`;
+      return;
+    }
+  }
+  const orders = (data && data.orders) || [];
+  const agg = (data && data.aggregate) || {};
+
+  // No open orders for this SKU: hide the KPI block, the button, and the accordion.
+  if (!orders.length) {
+    if (kpiSlot) kpiSlot.innerHTML = '';
+    if (btn) btn.hidden = true;
+    if (sec) { sec.hidden = true; sec.innerHTML = ''; }
+    return;
+  }
+
+  // Button becomes available and carries the order count.
+  if (btn) {
+    btn.hidden = false;
+    btn.classList.toggle('open', STATE.ooExpanded);
+    const cnt = el('ooOpenCount');
+    if (cnt) cnt.textContent = `· ${orders.length}`;
+  }
+
+  // ── KPI cards + interpretation note (HEAD, always visible) ──
+  if (kpiSlot) {
+    kpiSlot.innerHTML = `
+      <div class="oo-kpi-card">
+        <div class="oo-kpi-lead">
+          <div class="oo-kpi-lead-label">Ordered (total commitment)</div>
+          <div class="oo-kpi-lead-val mono">${fmt(agg.ordered_total)} <span class="oo-kpi-unit">sacks</span></div>
+          <div class="oo-kpi-lead-sub mono">${fmt(agg.weight_ton_total)} t · ${agg.n_orders} orders</div>
+        </div>
+        <div class="oo-kpi-splits">
+          <div class="oo-kpi-tile"><div class="oo-kpi-k">Reserved</div><div class="oo-kpi-v mono">${fmt(agg.reserved_total)}</div><div class="oo-kpi-of">held vs FG stock</div></div>
+          <div class="oo-kpi-tile"><div class="oo-kpi-k">Pending</div><div class="oo-kpi-v mono">${fmt(agg.pending_total)}</div><div class="oo-kpi-of">on production plan</div></div>
+          <div class="oo-kpi-tile"><div class="oo-kpi-k">Transformed</div><div class="oo-kpi-v mono">${fmt(agg.transformed_total)}</div><div class="oo-kpi-of">of pending, produced</div></div>
+        </div>
+      </div>
+      <div class="oo-interp">${agg.interpretation_note || ''}</div>`;
+  }
+
+  if (!sec) return;
+  sec.hidden = !STATE.ooExpanded;
+
+  const rowsHtml = orders.map((o, i) => {
+    const notes = o.order_notes || '';
+    const notesShort = notes.length > 28 ? notes.slice(0, 27) + '…' : notes;
+    const exp = o.is_export ? ' · export' : '';
+    return `
+      <tr class="oo-ord-row" onclick="ooToggleOrderRow(${i})">
+        <td class="mono oo-ord-toggle"><span class="oo-caret" id="oo-caret-${i}">▸</span>${o.order_id || ''}</td>
+        <td class="oo-ord-cust">${o.customer_name || ''}</td>
+        <td class="mono">${o.delivery_date || ''}</td>
+        <td class="mono" style="text-align:right">${fmt(o.ordered_quantity)}</td>
+        <td class="mono" style="text-align:right">${fmt(o.reserved_quantity)}</td>
+        <td class="mono" style="text-align:right">${fmt(o.pending_quantity)}</td>
+        <td class="mono" style="text-align:right">${fmt(o.transformed_quantity)}</td>
+        <td class="oo-ord-notes" title="${(notes || '').replace(/"/g, '&quot;')}">${notesShort}</td>
+      </tr>
+      <tr class="oo-ord-detail" id="oo-row-det-${i}" hidden>
+        <td colspan="8">
+          <div class="oo-ord-detgrid">
+            <div><span class="oo-dk">Description</span><span class="oo-dv">${o.description || '—'}</span></div>
+            <div><span class="oo-dk">Family / Sub</span><span class="oo-dv">${o.family || '—'}${o.subfamily ? ' / ' + o.subfamily : ''}</span></div>
+            <div><span class="oo-dk">Weight</span><span class="oo-dv mono">${fmt(o.weight_ton)} t</span></div>
+            <div><span class="oo-dk" title="NETPET returns fractional pallets; shown as-is pending explanation">Pallets*</span><span class="oo-dv mono">${o.pallets != null ? o.pallets : '—'}</span></div>
+            <div><span class="oo-dk">Export</span><span class="oo-dv">${o.is_export ? 'Yes' : 'No'}</span></div>
+            <div><span class="oo-dk">Reference</span><span class="oo-dv">${o.reference || '—'}</span></div>
+            <div class="oo-dfull"><span class="oo-dk">Notes</span><span class="oo-dv">${notes ? notes.replace(/\n/g, '<br>') : '—'}</span></div>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  sec.innerHTML = `
+    <div class="ds-title">Per-order detail · ${orders.length} open order${orders.length !== 1 ? 's' : ''}</div>
+    <div class="oo-ord-tblwrap">
+      <table class="oo-ord-tbl">
+        <thead><tr>
+          <th>Order</th><th>Customer</th><th>Delivery</th>
+          <th style="text-align:right">Ord.</th><th style="text-align:right">Res.</th>
+          <th style="text-align:right">Pend.</th><th style="text-align:right">Trans.</th><th>Notes</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="oo-unit-hint">Quantities in sacks. Reserved / Pending / Transformed are overlapping views of Ordered, not additive.</div>`;
+}
+
+function ooToggleOrderRow(i) {
+  const det = el(`oo-row-det-${i}`), caret = el(`oo-caret-${i}`);
+  if (!det) return;
+  det.hidden = !det.hidden;
+  if (caret) caret.textContent = det.hidden ? '▸' : '▾';
+}
+
+// ═══════════════════════════════════════════════════════
+// QUICK OVERVIEW — Top 5 Inventory (bars) + Top 5 Demand (sparklines)
+// ═══════════════════════════════════════════════════════
+// Decorative sparkline path — same shape across rows (visual only, real
+// per-SKU forecast_values not yet exposed by /api/attention; will swap
+// to real data when the backend adds forecast_values to the response).
+const SPARK_PATHS = [
+  'M 0,20 Q 20,8 40,14 T 80,6 T 120,12 T 160,4',
+  'M 0,14 Q 20,20 40,10 T 80,16 T 120,4 T 160,10',
+  'M 0,10 Q 20,4 40,16 T 80,10 T 120,18 T 160,8',
+  'M 0,18 Q 20,10 40,4 T 80,14 T 120,8 T 160,16',
+  'M 0,12 Q 20,18 40,6 T 80,20 T 120,10 T 160,4',
+];
+
+function renderQuickView(d) {
+  if (!d?.tiers) return;
+  const allRows = [];
+  ['A','B','C'].forEach(t => {
+    const tier = d.tiers[t]; if (!tier) return;
+    (tier.attention||[]).concat(tier.sufficient||[]).forEach(r => {
+      if (isWesTag(r.source_tag)) STATE.wmsSkus.add(r.sku);
+      allRows.push(r);
+    });
+  });
+  const byInv = [...allRows].filter(r=>(r.on_hand||0)>0)
+    .sort((a,b)=>(b.on_hand||0)-(a.on_hand||0)).slice(0,5);
+  // Top 5 by pending qty from open orders (descending)
+  const bySku = (STATE.openOrders && STATE.openOrders.by_sku) || {};
+  const byPending = Object.entries(bySku)
+    .map(([sku, agg]) => ({ sku, pending: agg.pending_total || 0, weight: agg.weight_ton_total || 0, n_orders: agg.n_orders || 0 }))
+    .filter(r => r.pending > 0)
+    .sort((a, b) => b.pending - a.pending)
+    .slice(0, 5);
+  const urgMap = {red:'urgent',yellow:'watch',green:'ok'};
+  const urgLbl = {red:'Urgent',yellow:'Watch',green:'OK'};
+
+  const maxInv     = byInv[0]?.on_hand || 1;
+  const maxPending = byPending[0]?.pending || 1;
+
+  function qvInvRow(r, idx) {
+    const uc=urgMap[r.urgency||'green'], ul=urgLbl[r.urgency||'green'];
+    const tier = r.velocity_tier || '';
+    const isWms = STATE.wmsSkus.has(r.sku);
+    const sel=STATE.selectedSku===r.sku?' selected':'';
+    const barPct = Math.max(4, ((r.on_hand||0) / maxInv) * 100);
+    return `<div class="qv-row${sel}" onclick="selectSku('${r.sku}')" data-qsku="${r.sku}">
+      <div class="qv-barbg" style="width:${barPct}%"></div>
+      <span class="qv-name" title="${r.description||''}">${r.sku}</span>
+      <span class="qv-val">${fmt(r.on_hand)}t</span>
+      ${tier ? `<span class="qv-tier ${tier}">${tier}</span>` : ''}
+      ${isWms ? `<span class="wms-tag">ASRS</span>` : ''}
+      <span class="qv-tag ${uc}">${ul}</span>
+    </div>`;
+  }
+
+  function qvPendingRow(r, idx) {
+    const sel = STATE.selectedSku === r.sku ? ' selected' : '';
+    const barPct = Math.max(4, (r.pending / maxPending) * 100);
+    return `<div class="qv-row${sel}" onclick="selectSku('${r.sku}')" data-qsku="${r.sku}">
+      <div class="qv-barbg" style="width:${barPct}%;background:var(--blue-bg)"></div>
+      <span class="qv-name" title="${r.sku}">${r.sku}</span>
+      <span class="qv-val">${r.pending.toLocaleString()} units</span>
+      <span class="qv-tag" style="background:var(--blue-bg);color:var(--blue)">${r.n_orders} order${r.n_orders!==1?'s':''}</span>
+    </div>`;
+  }
+
+  el('qvInventory').innerHTML = byInv.length
+    ? byInv.map((r,i)=>qvInvRow(r,i)).join('')
+    : '<div style="font-size:11px;color:var(--muted2);padding:4px 7px">No inventory data</div>';
+  el('qvOrders').innerHTML = byPending.length
+    ? byPending.map((r,i)=>qvPendingRow(r,i)).join('')
+    : '<div style="font-size:11px;color:var(--muted2);padding:4px 7px">No open order data</div>';
+  el('qvOrdersTitle').innerHTML = `📋 Top 5 by Pending Qty`;
+}
+
+function toggleQuickview() {
+  STATE.qvCollapsed = !STATE.qvCollapsed;
+  el('qvPanels').style.display = STATE.qvCollapsed ? 'none' : '';
+  el('qvCollapseBtn').textContent = STATE.qvCollapsed ? '▾ show' : '▴ hide';
+}
+
+// ═══════════════════════════════════════════════════════
+// LANDING TICKER — cycles REAL per-horizon totals (1W→2W→4W→8W→13W)
+// Data from /api/horizon_summary: each horizon's total forecast tonnage,
+// reliability %, and SKUs modelled. The headline number is the live
+// total-to-produce for whichever horizon is showing, not a hardcoded demo.
+// ═══════════════════════════════════════════════════════
+let lgTickIdx = 0;
+let lgTimer = null;
+
+async function loadHorizonSummary() {
+  try {
+    const d = await api('/api/horizon_summary');
+    STATE.horizonSummary = (d && d.ready && d.horizons && d.horizons.length) ? d.horizons : null;
+  } catch (e) { STATE.horizonSummary = null; }
+  setLandingActive(0);
+}
+
+// Show one horizon's numbers + highlight its chip.
+function setLandingActive(idx) {
+  const H = STATE.horizonSummary;
+  if (!H || !H.length) return;
+  lgTickIdx = ((idx % H.length) + H.length) % H.length;
+  const h = H[lgTickIdx];
+  const v1 = el('lgVal1'), v2 = el('lgVal2'), v3 = el('lgVal3'), l1 = el('lgLbl1');
+  if (l1) l1.textContent = `Next ${h.horizon_label} Demand`;
+  if (v1 && v2 && v3) {
+    [v1, v2, v3].forEach(v => v.classList.remove('tick'));
+    void v1.offsetWidth;
+    v1.textContent = `${fmt(h.total_forecast_tons)} t`;
+    v2.textContent = `${h.reliability_pct}%`;
+    v3.textContent = `${h.n_skus_modelled}`;
+    [v1, v2, v3].forEach(v => v.classList.add('tick'));
+  }
+  document.querySelectorAll('#lgChips .lg-chip').forEach((c, i) =>
+    c.classList.toggle('active', i === lgTickIdx));
+}
+
+// Chip click: jump to that horizon and restart the auto-cycle from there.
+function pickLanding(i) { setLandingActive(i); startLandingTicker(); }
+
+function startLandingTicker() {
+  if (lgTimer) clearInterval(lgTimer);
+  lgTimer = setInterval(() => {
+    if (STATE.currentTab) return;   // pause while the SKU list is showing
+    setLandingActive(lgTickIdx + 1);
+  }, 4500);
+}
+
+// ═══════════════════════════════════════════════════════
+// DATE RANGE PICKER
+// ═══════════════════════════════════════════════════════
+function getDefaultStart() {
+  // Always use today's date (live), not batch run date
+  let base = new Date();
+  const day = base.getDay();
+  const daysToMon = day === 1 ? 7 : (8 - day) % 7 || 7;
+  base.setDate(base.getDate() + daysToMon);
+  base.setHours(0, 0, 0, 0);
+  return base;
+}
+
+function getActiveStart() {
+  return STATE.customStartDate ? new Date(STATE.customStartDate) : getDefaultStart();
+}
+
+function getEndDate(startDate, horizonWeeks) {
+  const e = new Date(startDate);
+  e.setDate(e.getDate() + horizonWeeks * 7 - 1);
+  return e;
+}
+
+function fmtDate(d) {
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+}
+function toInputDate(d) { return d.toISOString().slice(0, 10); }
+
+function updateDateRangeDisplay() {
+  const btn = el('dateRangeLabel');
+  const start = getActiveStart();
+  const end   = getEndDate(start, STATE.horizon);
+  const isCustom = !!STATE.customStartDate;
+  const txt = `📅 ${fmtDate(start)} → ${fmtDate(end)}${isCustom ? ' ✎' : ''}`;
+  if (btn) btn.textContent = txt;
+  if (!btn) return;
+
+  const dpFrom = el('dpFrom'), dpTo = el('dpTo');
+  if (dpFrom) dpFrom.value = toInputDate(start);
+  if (dpTo)   dpTo.value   = toInputDate(end);
+
+  const lbls = { 1:'1 week', 4:'1 month', 8:'2 months', 13:'1 quarter' };
+  const snaps = el('dpSnaps');
+  if (snaps) snaps.innerHTML = [1, 4, 8, 13].map(h => {
+    const e2 = getEndDate(start, h);
+    return `<div class="dp-snap ${h === STATE.horizon ? 'active' : ''}" onclick="snapDuration(${h})">
+      ${h}W · ${lbls[h]}
+      <span class="dp-snap-sub">${fmtDate(start)} – ${fmtDate(e2)}</span>
+    </div>`;
+  }).join('');
+
+  updateWeeksLabel();
+}
+
+function updateWeeksLabel() {
+  const lbl = el('dpWeeksLabel');
+  if (!lbl) return;
+  const start = getActiveStart();
+  const end   = getEndDate(start, STATE.horizon);
+  const weeks = STATE.horizon;
+  const isCustom = !!STATE.customStartDate;
+  lbl.innerHTML = isCustom
+    ? `<strong>${weeks}W</strong> · ${fmtDate(start)} → ${fmtDate(end)} <span style="color:var(--g700)">● custom</span>`
+    : `<strong>${weeks}W</strong> · ${fmtDate(start)} → ${fmtDate(end)} <span style="color:var(--muted2)">(default)</span>`;
+}
+
+function onDateChange() {
+  const from = el('dpFrom').value;
+  if (!from) return;
+  const start = new Date(from);
+  const end   = getEndDate(start, STATE.horizon);
+  el('dpTo').value = toInputDate(end);
+
+  const weeks = STATE.horizon;
+  el('dpWeeksLabel').innerHTML =
+    `<strong>${weeks}W</strong> · ${fmtDate(start)} → ${fmtDate(end)} <span style="color:var(--yellow-dark)">● pending, click Apply</span>`;
+
+  const lbls = { 1:'1 week', 4:'1 month', 8:'2 months', 13:'1 quarter' };
+  el('dpSnaps').innerHTML = [1, 4, 8, 13].map(h => {
+    const e2 = getEndDate(start, h);
+    return `<div class="dp-snap ${h === STATE.horizon ? 'active' : ''}" onclick="snapDuration(${h})">
+      ${h}W · ${lbls[h]}
+      <span class="dp-snap-sub">${fmtDate(start)} – ${fmtDate(e2)}</span>
+    </div>`;
+  }).join('');
+}
+
+function snapDuration(w) {
+  const from = el('dpFrom').value;
+  const start = from ? new Date(from) : getActiveStart();
+  const end   = getEndDate(start, w);
+  el('dpTo').value = toInputDate(end);
+  document.querySelectorAll('.dp-snap').forEach((b, i) => {
+    b.classList.toggle('active', [1,4,8,13][i] === w);
+  });
+  if (w !== STATE.horizon) {
+    STATE.horizon = w;
+    document.querySelectorAll('.horizon-btn').forEach(b =>
+      b.classList.toggle('active', +b.dataset.w === w)
+    );
+  }
+  onDateChange();
+}
+
+async function applyDateRange() {
+  const from = el('dpFrom').value;
+  if (!from) { showToast('Pick a start date first'); return; }
+  STATE.customStartDate = from;
+  updateDateRangeDisplay();
+  toggleDatePicker();
+  await loadAttention(STATE.horizon);
+  showToast(`Forecast window: ${fmtDate(getActiveStart())} → ${fmtDate(getEndDate(getActiveStart(), STATE.horizon))}`, 3000);
+}
+
+async function resetDateToDefault() {
+  STATE.customStartDate = null;
+  updateDateRangeDisplay();
+  toggleDatePicker();
+  await loadAttention(STATE.horizon);
+  showToast('Reset to default forecast window');
+}
+
+// Called by the always-visible top toolbar's calendar chip. If no urgency
+// tab is picked yet, the in-list toolbar (which hosts the actual date-picker
+// popup) is display:none, so we first activate a tab so the SKU list — and
+// with it the in-list toolbar — mounts, then open the picker on next tick.
+function openInListDatePicker() {
+  if (!STATE.currentTab) {
+    activateTab('urgent');
+    setTimeout(toggleDatePicker, 60);
+  } else {
+    toggleDatePicker();
+  }
+}
+
+function toggleDatePicker() {
+  const pop = el('datePop'), btn = el('dateRangeBtn');
+  if (!pop) return;
+  const isOpen = pop.classList.contains('open');
+  pop.classList.toggle('open', !isOpen);
+  btn.classList.toggle('open', !isOpen);
+  if (!isOpen) {
+    // Escape ancestor clipping / body scroll-lock by pinning the popup with fixed positioning,
+    // and cap its height so the Apply button stays reachable on laptop viewports.
+    const r = btn.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const spaceBelow = vh - r.bottom - 16;
+    pop.style.position = 'fixed';
+    pop.style.top = (r.bottom + 6) + 'px';
+    pop.style.left = r.left + 'px';
+    pop.style.right = 'auto';
+    pop.style.maxHeight = Math.max(260, Math.min(spaceBelow, vh - 40)) + 'px';
+    pop.style.overflowY = 'auto';
+    updateDateRangeDisplay();
+  } else {
+    pop.style.position = ''; pop.style.top = ''; pop.style.left = '';
+    pop.style.maxHeight = ''; pop.style.overflowY = '';
+  }
+}
+
+document.addEventListener('click', e => {
+  const wrap = el('dateRangeWrap');
+  if (wrap && !wrap.contains(e.target)) {
+    el('datePop')?.classList.remove('open');
+    el('dateRangeBtn')?.classList.remove('open');
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// REFRESH ALL — returns to landing without reloading data
+// ═══════════════════════════════════════════════════════
+function refreshAll() {
+  const btn = el('refreshBtn');
+  btn.classList.add('spinning');
+  setTimeout(() => btn.classList.remove('spinning'), 600);
+
+  STATE.currentTab   = null;
+  STATE.prevTab      = null;
+  STATE.selectedSku  = null;
+  STATE.tierFilter   = 'all';
+  STATE.wesFilter    = false;
+
+  ['tabUrgent','tabWatch','tabOk'].forEach(id => el(id).classList.remove('active'));
+  el('tabIndicator').classList.remove('active');
+  el('tabIndicator').removeAttribute('data-tab');
+  document.querySelectorAll('.tier-filter-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.t === 'all'));
+
+  hide('skuSlideWrap');
+  const hero = el('landingGraphic');
+  if (hero) { hero.style.display = ''; hero.style.animation = 'none';
+    void hero.offsetWidth; hero.style.animation = ''; }
+  hideDetail();
+  showToast('View reset', 1500);
+}
+
+// ═══════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════
+function el(id)   { return document.getElementById(id); }
+function show(id) { const e=el(id); if(e) e.style.display=''; }
+function hide(id) { const e=el(id); if(e) e.style.display='none'; }
+function fmt(v)   { return v==null?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:1}); }
+function isWesTag(tag) { return !!tag && tag.startsWith('WES_'); }
+function showToast(msg, dur=3000) {
+  const t=el('toast'); t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), dur);
+}
+</script>
+</body>
+</html>
