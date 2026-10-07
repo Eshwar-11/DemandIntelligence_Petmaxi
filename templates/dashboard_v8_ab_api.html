@@ -1791,11 +1791,11 @@ body { font-size: 14px !important; }
 <div class="planning-toolbar" id="planningToolbarTop">
   <span class="toolbar-label">Planning Window</span>
   <div class="horizon-group">
-    <div class="horizon-btn" data-w="0" onclick="setHorizon(0)" title="No forecast — open orders vs on-hand only (today)">0</div>
-    <div class="horizon-btn active" data-w="1" onclick="setHorizon(1)" title="1 week — shift-level planning">1W</div>
-    <div class="horizon-btn" data-w="2" onclick="setHorizon(2)" title="2 weeks — fortnightly">2W</div>
-    <div class="horizon-btn" data-w="4" onclick="setHorizon(4)" title="4 weeks — monthly">4W</div>
-    <div class="horizon-btn" data-w="8" onclick="setHorizon(8)" title="8 weeks — bi-monthly">8W</div>
+    <div class="horizon-btn" data-w="0" onclick="setHorizon(0)" title="No forecast — all open orders due on or before today vs on-hand (incl. delayed orders)">0</div>
+    <div class="horizon-btn active" data-w="1" onclick="setHorizon(1)" title="1W — forecast + open orders due by today+7d (cumulative, delayed orders included)">1W</div>
+    <div class="horizon-btn" data-w="2" onclick="setHorizon(2)" title="2W — forecast + open orders due by today+14d (cumulative)">2W</div>
+    <div class="horizon-btn" data-w="4" onclick="setHorizon(4)" title="4W — forecast + open orders due by today+28d (cumulative)">4W</div>
+    <div class="horizon-btn" data-w="8" onclick="setHorizon(8)" title="8W — forecast + open orders due by today+56d (cumulative)">8W</div>
   </div>
   <!-- Working forecast-window picker (moved up from the hidden in-list toolbar
        so it actually opens). Pick a start date on the calendar; the end date is
@@ -1846,7 +1846,7 @@ body { font-size: 14px !important; }
         <div class="ut-cta">View →</div>
       </div>
       <div class="ut-label">Need production orders</div>
-      <div class="ut-sub">Gap &gt; 50% of forecast</div>
+      <div class="ut-sub">Gap &gt; 50% of forecast · <span id="acUrgentOO">—</span> with open orders</div>
     </div>
   </div>
   <div class="ut-tab watch" id="tabWatch" onclick="activateTab('watch')">
@@ -1857,7 +1857,7 @@ body { font-size: 14px !important; }
         <div class="ut-cta">View →</div>
       </div>
       <div class="ut-label">Worth watching</div>
-      <div class="ut-sub">Borderline, check next cycle</div>
+      <div class="ut-sub">Borderline, check next cycle · <span id="acWatchOO">—</span> with open orders</div>
     </div>
   </div>
   <div class="ut-tab ok" id="tabOk" onclick="activateTab('ok')">
@@ -1868,7 +1868,7 @@ body { font-size: 14px !important; }
         <div class="ut-cta">View →</div>
       </div>
       <div class="ut-label">Stock is covered</div>
-      <div class="ut-sub">Forecast met, no action</div>
+      <div class="ut-sub">Forecast met, no action · <span id="acOkOO">—</span> with open orders</div>
     </div>
   </div>
   <div class="ut-indicator" id="tabIndicator"></div>
@@ -2262,19 +2262,44 @@ function updateGradeChips(d) {
 }
 
 function updateBannerCounts(d) {
-  let urgent = 0, watch = 0, ok = 0;
-  ['A','B','C'].forEach(t => {
-    const tier = d.tiers[t]; if (!tier) return;
-    (tier.attention||[]).forEach(r => {
-      if (r.urgency==='red') urgent++;
-      else if (r.urgency==='yellow') watch++;
-      else ok++;
+  // Prefer the backend's precomputed overall counters (incl. "_with_oo"
+  // breakdowns the action-card sub-lines show). Fall back to tallying the
+  // tier rows if an older response is on the wire.
+  const o = d.overall;
+  let urgent, watch, ok, urgentOO, watchOO, okOO;
+  if (o && typeof o.red === 'number') {
+    urgent  = o.red;    watch  = o.yellow; ok  = o.green;
+    urgentOO= o.red_with_oo || 0;
+    watchOO = o.yellow_with_oo || 0;
+    okOO    = o.green_with_oo || 0;
+  } else {
+    urgent = watch = ok = 0;
+    urgentOO = watchOO = okOO = 0;
+    ['A','B','C'].forEach(t => {
+      const tier = d.tiers[t]; if (!tier) return;
+      (tier.attention||[]).forEach(r => {
+        const hasOO = (r.open_order_tons || 0) > 0;
+        if (r.urgency==='red')         { urgent++;  if (hasOO) urgentOO++; }
+        else if (r.urgency==='yellow') { watch++;   if (hasOO) watchOO++; }
+        else                           { ok++;      if (hasOO) okOO++; }
+      });
+      (tier.sufficient||[]).forEach(r => {
+        ok++;
+        if ((r.open_order_tons || 0) > 0) okOO++;
+      });
+      // Fallback if sufficient rows were truncated by top_n
+      if (!tier.sufficient || tier.sufficient.length < tier.sufficient_total) {
+        const missing = tier.sufficient_total - (tier.sufficient||[]).length;
+        ok += missing;
+      }
     });
-    ok += tier.sufficient_total;
-  });
+  }
   el('acUrgentCount').textContent = urgent;
   el('acWatchCount').textContent  = watch;
   el('acOkCount').textContent     = ok;
+  const uoo = el('acUrgentOO'); if (uoo) uoo.textContent = urgentOO;
+  const woo = el('acWatchOO');  if (woo) woo.textContent = watchOO;
+  const koo = el('acOkOO');     if (koo) koo.textContent = okOO;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2701,9 +2726,13 @@ function renderDetail(d) {
     }
     const f = d.forecasts[h]; if (!f) return '';
     const g = (f.forecast_total || 0) + ooH - avail;
+    const isExtra = (f.forecast_source || '').startsWith('extrapolated');
+    const srcTag = isExtra
+      ? `<span class="sku-badge nf" title="Model at ${h}W was unreliable; value scaled from ${f.forecast_source.replace('extrapolated_from_','')} weekly rate">EXT</span>`
+      : '';
     return `<tr class="${(!isDaily && h===effH)?' h-active':''}" style="cursor:pointer" onclick="setDetailHorizon(${h})">
       <td>${h}W${h===2?' · 2wk':h===4?' · 1M':h===8?' · 2M':''}</td>
-      <td>${fmt(f.forecast_total)}t</td>
+      <td>${fmt(f.forecast_total)}t ${srcTag}</td>
       <td class="mono">${toSacks(f.forecast_total)}</td>
       <td class="mono">${toPallets(f.forecast_total)}</td>
       <td class="h-gap ${g>0?'pos':'neg'}">${g>0?'+':''}${fmt(g)}t</td>
@@ -2974,7 +3003,7 @@ async function loadExternalInventory() {
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M10 4 L10 16 M4 10 L16 10"/></svg>
         </div>
         <span class="qv-new-sku" title="${r.sku}">${r.sku}</span>
-        <span class="qv-new-val">${r.pending_total.toLocaleString()} pending</span>
+        <span class="qv-new-val" title="${r.pending_total.toLocaleString()} sacks pending">${fmt(r.weight_ton_total || 0)}t pending</span>
         <span class="qv-new-note">${r.n_orders} order${r.n_orders!==1?'s':''}</span>
       </div>`).join('');
   } catch(e) { console.warn('loadExternalInventory (new_skus):', e.message); }
@@ -3129,13 +3158,13 @@ async function renderOrderBreakdown(sku) {
       <div class="oo-kpi-card">
         <div class="oo-kpi-lead">
           <div class="oo-kpi-lead-label">Ordered (total commitment)</div>
-          <div class="oo-kpi-lead-val mono">${fmt(agg.ordered_total)} <span class="oo-kpi-unit">sacks</span></div>
-          <div class="oo-kpi-lead-sub mono">${fmt(agg.weight_ton_total)} t · ${agg.n_orders} orders</div>
+          <div class="oo-kpi-lead-val mono">${fmt(agg.weight_ton_total)} <span class="oo-kpi-unit">t</span></div>
+          <div class="oo-kpi-lead-sub mono">${fmt(agg.ordered_total)} sacks · ${agg.n_orders} orders</div>
         </div>
         <div class="oo-kpi-splits">
-          <div class="oo-kpi-tile"><div class="oo-kpi-k">Reserved</div><div class="oo-kpi-v mono">${fmt(agg.reserved_total)}</div><div class="oo-kpi-of">held vs FG stock</div></div>
-          <div class="oo-kpi-tile"><div class="oo-kpi-k">Pending</div><div class="oo-kpi-v mono">${fmt(agg.pending_total)}</div><div class="oo-kpi-of">on production plan</div></div>
-          <div class="oo-kpi-tile"><div class="oo-kpi-k">Transformed</div><div class="oo-kpi-v mono">${fmt(agg.transformed_total)}</div><div class="oo-kpi-of">of pending, produced</div></div>
+          <div class="oo-kpi-tile"><div class="oo-kpi-k">Reserved</div><div class="oo-kpi-v mono">${fmt(agg.reserved_weight_ton)} <span class="oo-kpi-unit">t</span></div><div class="oo-kpi-of">${fmt(agg.reserved_total)} sacks · held vs FG stock</div></div>
+          <div class="oo-kpi-tile"><div class="oo-kpi-k">Pending</div><div class="oo-kpi-v mono">${fmt(agg.pending_weight_ton)} <span class="oo-kpi-unit">t</span></div><div class="oo-kpi-of">${fmt(agg.pending_total)} sacks · on production plan</div></div>
+          <div class="oo-kpi-tile"><div class="oo-kpi-k">Transformed</div><div class="oo-kpi-v mono">${fmt(agg.transformed_weight_ton)} <span class="oo-kpi-unit">t</span></div><div class="oo-kpi-of">${fmt(agg.transformed_total)} sacks · of pending, produced</div></div>
         </div>
       </div>
       <div class="oo-interp">${agg.interpretation_note || ''}</div>`;
@@ -3144,19 +3173,31 @@ async function renderOrderBreakdown(sku) {
   if (!sec) return;
   sec.hidden = !STATE.ooExpanded;
 
+  // Prorate sack quantities to tonnes using the row's full-ordered weight.
+  // Guard against ordered_quantity = 0 (fall back to full weight_ton when the
+  // basis qty is still positive — mirrors the backend _proration_sql logic).
+  const toTons = (o, qty) => {
+    const w = o.weight_ton || 0, ord = o.ordered_quantity || 0;
+    if (ord > 0) return w * (qty || 0) / ord;
+    return (qty || 0) > 0 ? w : 0;
+  };
   const rowsHtml = orders.map((o, i) => {
     const notes = o.order_notes || '';
     const notesShort = notes.length > 28 ? notes.slice(0, 27) + '…' : notes;
     const exp = o.is_export ? ' · export' : '';
+    const ordT = o.weight_ton || 0;
+    const resT = toTons(o, o.reserved_quantity);
+    const penT = toTons(o, o.pending_quantity);
+    const trT  = toTons(o, o.transformed_quantity);
     return `
       <tr class="oo-ord-row" onclick="ooToggleOrderRow(${i})">
         <td class="mono oo-ord-toggle"><span class="oo-caret" id="oo-caret-${i}">▸</span>${o.order_id || ''}</td>
         <td class="oo-ord-cust">${o.customer_name || ''}</td>
         <td class="mono">${o.delivery_date || ''}</td>
-        <td class="mono" style="text-align:right">${fmt(o.ordered_quantity)}</td>
-        <td class="mono" style="text-align:right">${fmt(o.reserved_quantity)}</td>
-        <td class="mono" style="text-align:right">${fmt(o.pending_quantity)}</td>
-        <td class="mono" style="text-align:right">${fmt(o.transformed_quantity)}</td>
+        <td class="mono" style="text-align:right" title="${fmt(o.ordered_quantity)} sacks">${fmt(ordT)}t</td>
+        <td class="mono" style="text-align:right" title="${fmt(o.reserved_quantity)} sacks">${fmt(resT)}t</td>
+        <td class="mono" style="text-align:right" title="${fmt(o.pending_quantity)} sacks">${fmt(penT)}t</td>
+        <td class="mono" style="text-align:right" title="${fmt(o.transformed_quantity)} sacks">${fmt(trT)}t</td>
         <td class="oo-ord-notes" title="${(notes || '').replace(/"/g, '&quot;')}">${notesShort}</td>
       </tr>
       <tr class="oo-ord-detail" id="oo-row-det-${i}" hidden>
@@ -3186,7 +3227,7 @@ async function renderOrderBreakdown(sku) {
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
-    <div class="oo-unit-hint">Quantities in sacks. Reserved / Pending / Transformed are overlapping views of Ordered, not additive.</div>`;
+    <div class="oo-unit-hint">Order rows show tonnes (sacks in brackets). Reserved / Pending / Transformed are overlapping views of Ordered, not additive.</div>`;
 }
 
 function ooToggleOrderRow(i) {
@@ -3225,7 +3266,11 @@ function renderQuickView(d) {
   // Top 5 by pending qty from open orders (descending)
   const bySku = (STATE.openOrders && STATE.openOrders.by_sku) || {};
   const byPending = Object.entries(bySku)
-    .map(([sku, agg]) => ({ sku, pending: agg.pending_total || 0, weight: agg.weight_ton_total || 0, n_orders: agg.n_orders || 0 }))
+    .map(([sku, agg]) => ({ sku,
+                             pending: agg.pending_weight_ton || 0,
+                             pending_sacks: agg.pending_total || 0,
+                             weight: agg.weight_ton_total || 0,
+                             n_orders: agg.n_orders || 0 }))
     .filter(r => r.pending > 0)
     .sort((a, b) => b.pending - a.pending)
     .slice(0, 5);
@@ -3257,7 +3302,7 @@ function renderQuickView(d) {
     return `<div class="qv-row${sel}" onclick="selectSku('${r.sku}')" data-qsku="${r.sku}">
       <div class="qv-barbg" style="width:${barPct}%;background:var(--blue-bg)"></div>
       <span class="qv-name" title="${r.sku}">${r.sku}</span>
-      <span class="qv-val">${r.pending.toLocaleString()} units</span>
+      <span class="qv-val" title="${r.pending_sacks.toLocaleString()} sacks">${fmt(r.pending)}t</span>
       <span class="qv-tag" style="background:var(--blue-bg);color:var(--blue)">${r.n_orders} order${r.n_orders!==1?'s':''}</span>
     </div>`;
   }

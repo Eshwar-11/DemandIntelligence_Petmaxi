@@ -482,11 +482,34 @@ def api_attention():
                     conn, params=(horizon_days,))
         if horizon_days > 0 else pd.DataFrame()
     )
+    # Full forecast table drives both the best-horizon reference AND the
+    # extrapolation fallback below (gap-alignment Oct 7 2026). The engine
+    # zeros out forecast_total when grade=Unreliable, which previously made
+    # SKUs silently drop off the action card at longer horizons; we now
+    # fall back to the SKU's best usable shorter horizon.
     all_forecasts = pd.read_sql(
-        "SELECT sku, horizon_days, wape, best_model FROM sku_forecasts", conn
+        "SELECT sku, horizon_days, horizon_weeks, wape, grade, best_model, forecast_total "
+        "FROM sku_forecasts", conn
     )
     inv_map, inv_source = _resolve_inventory(conn)
     conn.close()
+
+    # Build per-SKU "usable" forecast table for extrapolation: rows with a
+    # positive forecast_total and grade NOT Unreliable are trustworthy; we
+    # take the best (lowest WAPE) of those as the extrapolation source.
+    usable = all_forecasts[
+        (all_forecasts["forecast_total"].notna())
+        & (all_forecasts["forecast_total"] > 0.01)
+        & (all_forecasts["grade"].fillna("") != "Unreliable")
+    ].copy()
+    best_source_by_sku = {}
+    if not usable.empty:
+        for sku, grp in usable.groupby("sku"):
+            best = grp.loc[grp["wape"].idxmin()]
+            best_source_by_sku[str(sku)] = {
+                "horizon_weeks": int(best["horizon_weeks"]),
+                "weekly_rate": float(best["forecast_total"]) / max(int(best["horizon_weeks"]), 1),
+            }
 
     # Capped open orders for this horizon (gap-alignment rework)
     try:
@@ -535,14 +558,32 @@ def api_attention():
         is_forecastable = bool(m.get("is_forecastable")) if m is not None else False
 
         f = forecast_by_sku.get(sku_str)
-        if horizon_weeks == 0 or f is None:
-            forecast_total = 0.0 if horizon_weeks == 0 else None
-            if f is not None:
-                ft = f.get("forecast_total")
-                forecast_total = None if pd.isna(ft) else float(ft)
+        forecast_source = "modelled"
+        if horizon_weeks == 0:
+            forecast_total = 0.0  # p=0 is the No-Forecast view by design
+            forecast_source = "p0_hidden"
+        elif f is None:
+            forecast_total = None
+            forecast_source = "none"
         else:
             ft = f.get("forecast_total")
-            forecast_total = None if pd.isna(ft) else float(ft)
+            fgrade = f.get("grade") or ""
+            # Extrapolation fallback: when the engine zeroed out the forecast at
+            # this horizon (grade=Unreliable → forecast_total=0 is the engine's
+            # giving-up signal), use the SKU's best valid shorter-horizon weekly
+            # rate × target weeks. SKU stays visible on the action card and gets
+            # the NF badge below so Bruno sees the number is estimated, not
+            # modelled.
+            if (ft is None or pd.isna(ft) or float(ft) <= 0.01 or fgrade == "Unreliable") \
+               and sku_str in best_source_by_sku:
+                src = best_source_by_sku[sku_str]
+                forecast_total = round(src["weekly_rate"] * horizon_weeks, 3)
+                forecast_source = f"extrapolated_from_{src['horizon_weeks']}W"
+            elif ft is None or pd.isna(ft):
+                forecast_total = None
+                forecast_source = "none"
+            else:
+                forecast_total = float(ft)
 
         # Inventory
         if inv_source == "netpet_api":
@@ -599,9 +640,12 @@ def api_attention():
         else:
             grade = "No Model"
 
-        is_nf = (not is_new_sku) and (
+        # NF = non-forecastable at THIS horizon. Includes manifest SKUs with no
+        # row, no usable forecast, or whose forecast had to be extrapolated.
+        is_nf = (not is_new_sku) and horizon_weeks > 0 and (
             (not is_forecastable)
-            or (horizon_weeks > 0 and (f is None or forecast_total is None))
+            or (f is None or forecast_total is None)
+            or forecast_source.startswith("extrapolated")
         )
 
         wape_val = None
@@ -627,6 +671,7 @@ def api_attention():
             "is_nf": is_nf,
             "is_new": is_new_sku,
             "forecast_total": round(forecast_total, 2) if forecast_total is not None else None,
+            "forecast_source": forecast_source,
             "forecast_hidden": (horizon_weeks == 0),
             "open_order_tons": oo_tons,
             "open_order_basis": OPEN_ORDER_GAP_BASIS,
@@ -649,18 +694,32 @@ def api_attention():
 
     tier_labels = {"A": "Fast Movers", "B": "Medium Movers", "C": "Slow Movers"}
     result = {}
+    # Also totals by urgency ∪ with-OO flag for the three action-card tiles.
+    overall = {"red": 0, "yellow": 0, "green": 0,
+               "red_with_oo": 0, "yellow_with_oo": 0, "green_with_oo": 0}
     for t in ("A", "B", "C"):
         if horizon_weeks == 0:
-            # p = 0: sort attention by absolute gap tonnes desc (user request)
             attn = sorted(by_tier[t]["attention"], key=lambda x: -(x["gap"] or 0))
             suff = sorted(by_tier[t]["sufficient"], key=lambda x: (x["gap"] or 0))
         else:
-            # Other horizons: sort by gap_pct desc inside attention, asc in sufficient
             attn = sorted(by_tier[t]["attention"], key=lambda x: -(x["gap_pct"] or 0))
             suff = sorted(by_tier[t]["sufficient"], key=lambda x: (x["gap_pct"] or 0))
+        att_with_oo = sum(1 for r in attn if (r.get("open_order_tons") or 0) > 0)
+        suf_with_oo = sum(1 for r in suff if (r.get("open_order_tons") or 0) > 0)
+        for r in attn:
+            u = r.get("urgency") or "green"
+            overall[u] = overall.get(u, 0) + 1
+            if (r.get("open_order_tons") or 0) > 0:
+                overall[f"{u}_with_oo"] = overall.get(f"{u}_with_oo", 0) + 1
+        for r in suff:
+            overall["green"] = overall.get("green", 0) + 1
+            if (r.get("open_order_tons") or 0) > 0:
+                overall["green_with_oo"] = overall.get("green_with_oo", 0) + 1
         result[t] = {"label": tier_labels[t],
                      "attention": attn[:top_n], "attention_total": len(attn),
-                     "sufficient": suff[:top_n], "sufficient_total": len(suff)}
+                     "attention_with_oo": att_with_oo,
+                     "sufficient": suff[:top_n], "sufficient_total": len(suff),
+                     "sufficient_with_oo": suf_with_oo}
 
     return jsonify({
         "ready": True,
@@ -673,6 +732,7 @@ def api_attention():
         "inventory_source": inv_source,
         "open_order_basis": OPEN_ORDER_GAP_BASIS,
         "tiers": result,
+        "overall": overall,  # urgency totals + how many have open orders
     })
 
 
@@ -694,17 +754,40 @@ def api_sku_detail(sku_id: str):
     has_inventory = _table_exists(conn, "sku_inventory")
     inv = conn.execute("SELECT * FROM sku_inventory WHERE sku = ?", (sku_id,)).fetchone() if has_inventory else None
     conn.close()
+    # Pick the best usable shorter horizon for extrapolation (same rule as
+    # /api/attention): grade != Unreliable AND forecast_total > 0.
+    usable_rows = [
+        r for r in forecasts_raw
+        if r["forecast_total"] is not None
+        and float(r["forecast_total"]) > 0.01
+        and (r["grade"] or "") != "Unreliable"
+    ]
+    best_src = None
+    if usable_rows:
+        best_src = min(usable_rows, key=lambda r: (r["wape"] if r["wape"] is not None else 999))
+        best_src = {
+            "horizon_weeks": int(best_src["horizon_weeks"]),
+            "weekly_rate": float(best_src["forecast_total"]) / max(int(best_src["horizon_weeks"]), 1),
+        }
     forecasts = {}
     for f in forecasts_raw:
         h = f["horizon_weeks"]
+        ft_raw = f["forecast_total"]
+        fgrade = f["grade"] or "No Model"
+        fsource = "modelled"
+        ft_out = None if ft_raw is None else float(ft_raw)
+        if (ft_out is None or ft_out <= 0.01 or fgrade == "Unreliable") and best_src:
+            ft_out = round(best_src["weekly_rate"] * h, 3)
+            fsource = f"extrapolated_from_{best_src['horizon_weeks']}W"
         forecasts[h] = {
             "horizon_days": f["horizon_days"], "horizon_weeks": f["horizon_weeks"],
             "horizon_label": HORIZON_LABELS.get(h, h),
             "best_model": f["best_model"],
             "wape": round(f["wape"], 2) if f["wape"] is not None else None,
             "robust_mape": round(f["robust_mape"], 2) if f["robust_mape"] is not None else None,
-            "grade": f["grade"] or "No Model",
-            "forecast_total": round(f["forecast_total"], 2) if f["forecast_total"] is not None else None,
+            "grade": fgrade,
+            "forecast_total": round(ft_out, 2) if ft_out is not None else None,
+            "forecast_source": fsource,
             "forecast_values": json.loads(f["forecast_values"]) if f["forecast_values"] else [],
             "forecast_dates": json.loads(f["forecast_dates"]) if f["forecast_dates"] else [],
             "zero_wape_override": bool(f["zero_wape_override"]),
