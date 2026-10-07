@@ -1,0 +1,20 @@
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo
+
+# SQLite WAL/SHM sidecars. The .db files themselves are tracked (starter
+# snapshots for the Docker image / demo); the sidecars are ephemeral and
+# recreated on first open, so they shouldn't be in version control.
+*.db-wal
+*.db-shm
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local outputs & scratch
+outputs/
+*.log
