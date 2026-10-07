@@ -826,8 +826,9 @@ html[data-theme="dark"] .dh-hz-cap.active {
 .tier-filter-btn:last-child { border-right: none; }
 .tier-filter-btn.active { background: var(--g800); color: #fff; }
 .tier-filter-btn:hover:not(.active) { background: var(--g50); }
-.tier-filter-btn.wes-pill.active { background: var(--blue); }
-.tier-filter-btn.wes-pill { border-left: 2px solid var(--border); }
+.tier-filter-btn.new-pill.active { background: #1a4a7a; color: #fff; }
+html[data-theme="dark"] .tier-filter-btn.new-pill.active { background: #3a6ea0; color: #fff; }
+.tier-filter-btn.new-pill { border-left: 2px solid var(--border); }
 
 /* SKU table */
 .sku-table-area { flex: 1; }
@@ -1057,7 +1058,10 @@ th.sort-desc::after { content: ' ▼'; font-size: 7px; }
 }
 .qv-panel.new-entries .qv-panel-title { color: var(--blue); }
 .qv-new-entries-scroll {
-  max-height: 108px;
+  /* Match the natural height of the other quickview panels (Top 5 Inventory
+     and Top 5 Pending each render ~5 rows at ~26px each ≈ 150px). Scroll
+     once past that, so the three panels sit level. */
+  max-height: 160px;
   overflow-y: auto;
 }
 .qv-new-entries-scroll::-webkit-scrollbar { width: 3px; }
@@ -1981,7 +1985,7 @@ body { font-size: 14px !important; }
         <div class="tier-filter-btn" data-t="A" onclick="setTierFilter('A')">Fast</div>
         <div class="tier-filter-btn" data-t="B" onclick="setTierFilter('B')">Medium</div>
         <div class="tier-filter-btn" data-t="C" onclick="setTierFilter('C')">Slow</div>
-        <div class="tier-filter-btn wes-pill" data-t="WES" onclick="setTierFilter('WES')" title="Show only SKUs with real WES/ASRS inventory">WES Live</div>
+        <div class="tier-filter-btn new-pill" data-t="NEW" onclick="setTierFilter('NEW')" title="Show only new SKUs — present in open orders but not in the forecast manifest">New SKUs</div>
       </div>
     </div> -->
      <!-- In-list filter row: SKU search + velocity/WES filters. The horizon
@@ -1997,7 +2001,7 @@ body { font-size: 14px !important; }
         <div class="tier-filter-btn" data-t="A" onclick="setTierFilter('A')">Fast</div>
         <div class="tier-filter-btn" data-t="B" onclick="setTierFilter('B')">Medium</div>
         <div class="tier-filter-btn" data-t="C" onclick="setTierFilter('C')">Slow</div>
-        <div class="tier-filter-btn wes-pill" data-t="WES" onclick="setTierFilter('WES')" title="Show only SKUs with real WES/ASRS inventory">WES Live</div>
+        <div class="tier-filter-btn new-pill" data-t="NEW" onclick="setTierFilter('NEW')" title="Show only new SKUs — present in open orders but not in the forecast manifest">New SKUs</div>
       </div>
     </div>
     <div class="sku-table-area" id="skuTableArea">
@@ -2027,6 +2031,7 @@ let STATE = {
   horizon: 1,
   tierFilter: 'all',
   wesFilter: false,
+  newSkuFilter: false,  // toggled by the New SKUs chip; filters to is_new rows only
   attentionData: null,
   selectedSku: null,
   detailData: null,
@@ -2359,13 +2364,13 @@ function setHorizon(w) {
 }
 
 function setTierFilter(t) {
-  if (t === 'WES') {
-    STATE.wesFilter = !STATE.wesFilter;
-    document.querySelectorAll('.tier-filter-btn.wes-pill').forEach(b =>
-      b.classList.toggle('active', STATE.wesFilter));
+  if (t === 'NEW') {
+    STATE.newSkuFilter = !STATE.newSkuFilter;
+    document.querySelectorAll('.tier-filter-btn.new-pill').forEach(b =>
+      b.classList.toggle('active', STATE.newSkuFilter));
   } else {
     STATE.tierFilter = t;
-    document.querySelectorAll('.tier-filter-btn:not(.wes-pill)').forEach(b =>
+    document.querySelectorAll('.tier-filter-btn:not(.new-pill)').forEach(b =>
       b.classList.toggle('active', b.dataset.t===t));
   }
   if (STATE.currentTab) renderTable();
@@ -2436,6 +2441,7 @@ function renderTable() {
     let rows = combined.filter(r => (r.urgency||'green') === targetUrg);
     rows = applySearchFilter(sortRows(rows));
     if (STATE.wesFilter) rows = rows.filter(r => STATE.wmsSkus.has(r.sku) && isWesTag(r.source_tag));
+    if (STATE.newSkuFilter) rows = rows.filter(r => r.is_new === true);
     if (!rows.length) return;
 
     const statLabel = STATE.currentTab==='urgent' ? 'urgent' :
@@ -2779,20 +2785,15 @@ function renderDetail(d) {
 
     <div class="ds">
       <div class="ds-title">Inventory Breakdown</div>
-      <div class="inv-grid">
+      <div class="inv-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
         <div class="inv-card">
           <div class="ic-label">On Hand</div>
           <div class="ic-val">${fmt(d.inventory.on_hand)}</div>
           <div class="ic-unit">tons</div>
         </div>
         <div class="inv-card">
-          <div class="ic-label">Allocated</div>
-          <div class="ic-val">${fmt(d.inventory.allocated)}</div>
-          <div class="ic-unit">tons</div>
-        </div>
-        <div class="inv-card">
-          <div class="ic-label">Available</div>
-          <div class="ic-val">${fmt(d.inventory.available)}</div>
+          <div class="ic-label">Open Orders · ${hLbl}</div>
+          <div class="ic-val">${fmt(oo)}</div>
           <div class="ic-unit">tons</div>
         </div>
       </div>
@@ -2806,6 +2807,7 @@ function renderDetail(d) {
       </div>` : ''}
     </div>
 
+    ${isP0 ? '' : `
     <div class="ds">
       <div class="ds-title">Forecast by Planning Window</div>
       <table class="horizon-tbl">
@@ -2817,26 +2819,39 @@ function renderDetail(d) {
     <div class="ds">
       <div class="ds-title">Forecast Outlook — ${hLbl} Window</div>
       <div class="chart-wrap"><canvas id="detailChart"></canvas></div>
-    </div>
+    </div>`}
 
-    ${rmRows ? `
-    <div class="ds">
-      <div class="ds-title">Raw Materials Needed · ${hLbl}</div>
-      <table class="rm-tbl">
-        <thead><tr>
-          <th>Raw Material</th>
-          <th style="text-align:right">kg / 1000kg FG</th>
-          <th style="text-align:right">Required</th>
-        </tr></thead>
-        <tbody>
-          ${rmRows}
-          <tr class="rm-total">
-            <td colspan="2">Total RM for ${fmt(fcTot)}t production</td>
-            <td style="text-align:right">~${fmt(rmTot)}t</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>` : `
+    ${(d.rm_requirements||[]).length ? (() => {
+      // RM required to meet open-order ordered qty at the selected horizon.
+      // (Was previously driven by the primary-horizon forecast; now follows
+      // the horizon selector so it matches what the planner sees above.)
+      const rmBasisTons = oo;
+      const rmRowsHz = (d.rm_requirements||[]).map(r =>
+        `<tr>
+          <td><div class="rm-name">${r.rm_name}</div><div class="rm-code">${r.rm_sku}</div></td>
+          <td class="mono" style="text-align:right">${(r.ton_per_1000kg||0).toFixed(1)}</td>
+          <td class="mono" style="text-align:right">${fmt((rmBasisTons/1000)*(r.ton_per_1000kg||0))}t</td>
+        </tr>`).join('');
+      const rmTotHz = (d.rm_requirements||[]).reduce((s,r)=>s+((rmBasisTons/1000)*(r.ton_per_1000kg||0)),0);
+      return `
+      <div class="ds">
+        <div class="ds-title">Raw Materials Needed · for ${hLbl} Open Orders (${fmt(oo)}t)</div>
+        <table class="rm-tbl">
+          <thead><tr>
+            <th>Raw Material</th>
+            <th style="text-align:right">kg / 1000kg FG</th>
+            <th style="text-align:right">Required</th>
+          </tr></thead>
+          <tbody>
+            ${rmRowsHz}
+            <tr class="rm-total">
+              <td colspan="2">Total RM to fulfil ${fmt(rmBasisTons)}t of open orders</td>
+              <td style="text-align:right">~${fmt(rmTotHz)}t</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+    })() : `
     <div class="ds">
           <div class="ds-title">Raw Materials</div>
       <div style="color:var(--muted);font-size:12px;font-weight:500">No formula mapping found for this SKU.</div>
