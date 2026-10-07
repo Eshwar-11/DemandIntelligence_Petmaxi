@@ -482,34 +482,17 @@ def api_attention():
                     conn, params=(horizon_days,))
         if horizon_days > 0 else pd.DataFrame()
     )
-    # Full forecast table drives both the best-horizon reference AND the
-    # extrapolation fallback below (gap-alignment Oct 7 2026). The engine
-    # zeros out forecast_total when grade=Unreliable, which previously made
-    # SKUs silently drop off the action card at longer horizons; we now
-    # fall back to the SKU's best usable shorter horizon.
+    # Full forecast table drives the best-horizon reference shown on the
+    # card. Oct 7 realignment (option B): extrapolation DROPPED. An
+    # Unreliable grade at a horizon means forecast_total = 0 upstream; the
+    # SKU still appears thanks to the full-portfolio universe above, routes
+    # by (oo - inv) when oo > 0, else sits in sufficient.
     all_forecasts = pd.read_sql(
         "SELECT sku, horizon_days, horizon_weeks, wape, grade, best_model, forecast_total "
         "FROM sku_forecasts", conn
     )
     inv_map, inv_source = _resolve_inventory(conn)
     conn.close()
-
-    # Build per-SKU "usable" forecast table for extrapolation: rows with a
-    # positive forecast_total and grade NOT Unreliable are trustworthy; we
-    # take the best (lowest WAPE) of those as the extrapolation source.
-    usable = all_forecasts[
-        (all_forecasts["forecast_total"].notna())
-        & (all_forecasts["forecast_total"] > 0.01)
-        & (all_forecasts["grade"].fillna("") != "Unreliable")
-    ].copy()
-    best_source_by_sku = {}
-    if not usable.empty:
-        for sku, grp in usable.groupby("sku"):
-            best = grp.loc[grp["wape"].idxmin()]
-            best_source_by_sku[str(sku)] = {
-                "horizon_weeks": int(best["horizon_weeks"]),
-                "weekly_rate": float(best["forecast_total"]) / max(int(best["horizon_weeks"]), 1),
-            }
 
     # Capped open orders for this horizon (gap-alignment rework)
     try:
@@ -520,6 +503,16 @@ def api_attention():
         print(f"WARN: capped open-orders map failed: {e}")
         oo_map = {}
 
+    # SKUs that ever appear in the open-orders feed, regardless of horizon.
+    # Used to seed the full-portfolio universe at every horizon so NEW SKUs
+    # (and non-forecastable manifest SKUs) with orders beyond the current
+    # horizon still show up (as "sufficient" if no OO qualifies at this cap).
+    try:
+        all_oo_skus = set(oo_store.aggregate_all_skus().keys())
+    except Exception as e:
+        print(f"WARN: full oo sku set failed: {e}")
+        all_oo_skus = set()
+
     # Lookup helpers
     manifest_by_sku = {str(r["sku"]): r for _, r in manifest_all.iterrows()}
     forecast_by_sku = (
@@ -527,21 +520,19 @@ def api_attention():
         if not forecasts_h.empty else {}
     )
 
-    # --- Build the SKU universe for this horizon ---------------------------
-    universe = set()
-    if horizon_weeks == 0:
-        # p = 0: every SKU that has any open order on/before today.
-        universe = set(oo_map.keys())
-    else:
-        # p >= 1W: forecastable manifest SKUs + non-forecastable manifest
-        # SKUs with open orders > 0 + new SKUs (not in manifest) with
-        # open orders > 0.
-        universe |= {s for s, r in manifest_by_sku.items() if bool(r.get("is_forecastable"))}
-        universe |= {s for s, t in oo_map.items() if (t or 0) > 0}
+    # --- Build the SKU universe (full portfolio at EVERY horizon) ----------
+    # Per Oct 7 realignment: all three action-card tiles must sum to the
+    # total portfolio count, regardless of horizon. Universe =
+    #   every manifest SKU (forecastable + non-forecastable)
+    #   UNION
+    #   every SKU ever in open orders (NEW SKUs with any delivery date).
+    # SKUs with no OO at the chosen horizon and no forecast fall into the
+    # Sufficient bucket naturally (gap_pct guards to 0 when denom = 0).
+    universe = set(manifest_by_sku.keys()) | all_oo_skus
 
     if tier_filter in ("A", "B", "C"):
-        # Only applied to SKUs that are in the manifest. New SKUs are tier C
-        # by default — see tier resolution below.
+        # Tier filter still only applies to the SKUs that have a tier in
+        # the manifest; NEW SKUs sit in C by convention.
         universe = {
             s for s in universe
             if (manifest_by_sku.get(s, {}).get("velocity_tier") or "C") == tier_filter
@@ -568,22 +559,18 @@ def api_attention():
         else:
             ft = f.get("forecast_total")
             fgrade = f.get("grade") or ""
-            # Extrapolation fallback: when the engine zeroed out the forecast at
-            # this horizon (grade=Unreliable → forecast_total=0 is the engine's
-            # giving-up signal), use the SKU's best valid shorter-horizon weekly
-            # rate × target weeks. SKU stays visible on the action card and gets
-            # the NF badge below so Bruno sees the number is estimated, not
-            # modelled.
-            if (ft is None or pd.isna(ft) or float(ft) <= 0.01 or fgrade == "Unreliable") \
-               and sku_str in best_source_by_sku:
-                src = best_source_by_sku[sku_str]
-                forecast_total = round(src["weekly_rate"] * horizon_weeks, 3)
-                forecast_source = f"extrapolated_from_{src['horizon_weeks']}W"
-            elif ft is None or pd.isna(ft):
+            if ft is None or pd.isna(ft):
                 forecast_total = None
                 forecast_source = "none"
+            elif float(ft) <= 0.01 or fgrade == "Unreliable":
+                # Engine's "give up" signal: Unreliable grade carries fcast=0.
+                # Oct 7 realignment (option B): keep the 0 — do NOT extrapolate.
+                forecast_total = 0.0
+                forecast_source = "unreliable_zero"
             else:
                 forecast_total = float(ft)
+
+        oo_tons = round(float(oo_map.get(sku_str, 0.0)), 3)
 
         # Inventory
         if inv_source == "netpet_api":
@@ -594,8 +581,6 @@ def api_attention():
         else:
             available = None
         on_hand = available if available is not None else 0.0
-
-        oo_tons = round(float(oo_map.get(sku_str, 0.0)), 3)
 
         # --- Gap calc (additive, no allocated subtraction) -----------------
         if horizon_weeks == 0:
@@ -640,12 +625,14 @@ def api_attention():
         else:
             grade = "No Model"
 
-        # NF = non-forecastable at THIS horizon. Includes manifest SKUs with no
-        # row, no usable forecast, or whose forecast had to be extrapolated.
+        # NF = non-forecastable at THIS horizon. A manifest SKU is NF when it
+        # has no row, no forecast, or the engine marked the row Unreliable
+        # (fcast = 0 upstream). Extrapolation is no longer part of the picture.
         is_nf = (not is_new_sku) and horizon_weeks > 0 and (
             (not is_forecastable)
-            or (f is None or forecast_total is None)
-            or forecast_source.startswith("extrapolated")
+            or f is None
+            or forecast_total is None
+            or forecast_source == "unreliable_zero"
         )
 
         wape_val = None
@@ -847,31 +834,21 @@ def api_sku_detail(sku_id: str):
     has_inventory = _table_exists(conn, "sku_inventory")
     inv = conn.execute("SELECT * FROM sku_inventory WHERE sku = ?", (sku_id,)).fetchone() if has_inventory else None
     conn.close()
-    # Pick the best usable shorter horizon for extrapolation (same rule as
-    # /api/attention): grade != Unreliable AND forecast_total > 0.
-    usable_rows = [
-        r for r in forecasts_raw
-        if r["forecast_total"] is not None
-        and float(r["forecast_total"]) > 0.01
-        and (r["grade"] or "") != "Unreliable"
-    ]
-    best_src = None
-    if usable_rows:
-        best_src = min(usable_rows, key=lambda r: (r["wape"] if r["wape"] is not None else 999))
-        best_src = {
-            "horizon_weeks": int(best_src["horizon_weeks"]),
-            "weekly_rate": float(best_src["forecast_total"]) / max(int(best_src["horizon_weeks"]), 1),
-        }
+    # Oct 7: extrapolation dropped. Forecast values come straight from the
+    # engine; an Unreliable row carries fcast = 0 and the UI shows 0.
     forecasts = {}
     for f in forecasts_raw:
         h = f["horizon_weeks"]
         ft_raw = f["forecast_total"]
         fgrade = f["grade"] or "No Model"
-        fsource = "modelled"
         ft_out = None if ft_raw is None else float(ft_raw)
-        if (ft_out is None or ft_out <= 0.01 or fgrade == "Unreliable") and best_src:
-            ft_out = round(best_src["weekly_rate"] * h, 3)
-            fsource = f"extrapolated_from_{best_src['horizon_weeks']}W"
+        # Mirror /api/attention: Unreliable row OR ~0 forecast is carried as
+        # 0 so the detail pane shows the same number used for routing.
+        if ft_out is not None and (ft_out <= 0.01 or fgrade == "Unreliable"):
+            ft_out = 0.0
+            fsource = "unreliable_zero"
+        else:
+            fsource = "modelled"
         forecasts[h] = {
             "horizon_days": f["horizon_days"], "horizon_weeks": f["horizon_weeks"],
             "horizon_label": HORIZON_LABELS.get(h, h),

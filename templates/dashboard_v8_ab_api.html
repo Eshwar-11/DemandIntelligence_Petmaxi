@@ -2732,9 +2732,9 @@ function renderDetail(d) {
     }
     const f = d.forecasts[h]; if (!f) return '';
     const g = (f.forecast_total || 0) + ooH - avail;
-    const isExtra = (f.forecast_source || '').startsWith('extrapolated');
-    const srcTag = isExtra
-      ? `<span class="sku-badge nf" title="Model at ${h}W was unreliable; value scaled from ${f.forecast_source.replace('extrapolated_from_','')} weekly rate">EXT</span>`
+    const isUnrel = (f.forecast_source || '') === 'unreliable_zero';
+    const srcTag = isUnrel
+      ? `<span class="sku-badge nf" title="Model at ${h}W was unreliable; forecast carried as 0 so the routing is driven by open orders at this horizon">NF</span>`
       : '';
     return `<tr class="${(!isDaily && h===effH)?' h-active':''}" style="cursor:pointer" onclick="setDetailHorizon(${h})">
       <td>${h}W${h===2?' · 2wk':h===4?' · 1M':h===8?' · 2M':''}</td>
