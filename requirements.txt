@@ -1,5 +1,5 @@
-# PetMaxi Forecasting v7 — Python dependencies
-# Tested on Python 3.14.0 (local environment)
+# PetMaxi Forecasting v8 — Python dependencies
+# Tested on Python 3.11 (Docker base image).
 
 # Core
 numpy>=1.26
@@ -14,3 +14,16 @@ scikit-learn>=1.4
 flask>=3.0
 flask-cors>=4.0
 werkzeug>=3.0            # ships with flask, listed explicitly for DispatcherMiddleware
+
+# NETPET HTTP client (used by open_orders_store + netpet_inventory_store)
+requests>=2.31
+urllib3>=2.0
+
+# Optional: lets the client trust the host OS cert store (petMaxi-CA on the
+# domain-joined Windows box). Falls back silently if missing — ship only on
+# Python 3.10+.
+truststore>=0.9; python_version >= "3.10"
+
+# Production WSGI server (used by the Docker image; dev still works with the
+# werkzeug run_simple in __main__).
+gunicorn>=21.2

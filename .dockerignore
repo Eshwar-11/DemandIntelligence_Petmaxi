@@ -1,0 +1,29 @@
+# Keep the build context small and the image stateless-friendly.
+.git
+.gitignore
+.gitattributes
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.vscode
+.idea
+*.swp
+
+# SQLite side-cars should not be baked into the image; the live db file
+# itself is copied (so the demo has starter data), but WAL/SHM come and go
+# at runtime and must not land in the layer.
+db/*.db-wal
+db/*.db-shm
+
+# Local outputs & scratch work
+outputs/
+db_export/
+*.log
+
+# Dev-only docs
+DEPLOY_README.md
+
+# Docker meta — avoid recursive copy
+Dockerfile
+.dockerignore
