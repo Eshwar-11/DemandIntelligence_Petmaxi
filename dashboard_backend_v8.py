@@ -736,6 +736,96 @@ def api_attention():
     })
 
 
+def _new_sku_detail_response(sku_id: str):
+    """Build a SKU detail payload for a SKU that is NOT in sku_manifest but
+    does appear in the open-orders feed (NEW-SKU path). The shape mirrors
+    api_sku_detail enough that renderDetail() can draw it at p=0: no forecast
+    rows, open-order tonnes per horizon, on-hand from NETPET inventory,
+    inventory block with the horizon-0 gap already filled."""
+    # Open-orders aggregate (across all horizons; we also surface the
+    # horizon-capped sums for the per-horizon gap dict)
+    try:
+        oo_agg = oo_store.aggregate_for_sku(sku_id)
+    except Exception as e:
+        print(f"WARN: oo aggregate for NEW SKU {sku_id} failed: {e}")
+        oo_agg = {}
+    oo_tons_total = round(float(oo_agg.get("pending_weight_ton") or
+                                 oo_agg.get("weight_ton_total") or 0.0), 3)
+
+    # Inventory
+    available_val, av_source = _available_for_sku(sku_id)
+    on_hand = round(float(available_val), 2) if available_val is not None else 0.0
+
+    # Per-horizon capped open orders (same horizons the UI exposes)
+    oo_tons_by_horizon = {}
+    gaps = {}
+    for h_weeks, h_days in HORIZON_WEEKS_TO_DAYS.items():
+        try:
+            oo_h = oo_store.open_order_gap_tons_for_sku_capped(
+                sku_id, OPEN_ORDER_GAP_BASIS, h_days
+            )
+        except Exception as e:
+            print(f"WARN: capped OO (h={h_days}) for NEW SKU {sku_id} failed: {e}")
+            oo_h = 0.0
+        oo_tons_by_horizon[h_weeks] = oo_h
+        # No forecast for a NEW SKU, so gap = oo - inventory at every horizon
+        gaps[h_weeks] = round(oo_h - on_hand, 2)
+
+    # Pull description / family from the first open-order item we see, so the
+    # card title is not a bare SKU code.
+    description, family, subfamily = None, None, None
+    try:
+        items = oo_store.get_items_for_sku(sku_id)
+        if items:
+            description = items[0].get("description")
+            family = items[0].get("family")
+            subfamily = items[0].get("subfamily")
+    except Exception as e:
+        print(f"WARN: oo items for NEW SKU {sku_id} failed: {e}")
+        items = []
+
+    if not items and oo_tons_total == 0.0 and on_hand == 0.0:
+        # Nothing anywhere: fall back to a clean 404.
+        return jsonify({"error": f"SKU {sku_id} not found"}), 404
+
+    inventory = {
+        "on_hand": on_hand,
+        "available": on_hand,
+        "source_tag": "NETPET" if av_source == "netpet_api" else None,
+        "covered": available_val is not None,
+        "open_order_tons": oo_tons_total,
+        "open_order_basis": OPEN_ORDER_GAP_BASIS,
+    }
+
+    return jsonify({
+        "sku": sku_id,
+        "description": description or sku_id,
+        "family": family,
+        "subfamily": subfamily,
+        "velocity_tier": "C",   # convention: new SKUs sit in C by default
+        "velocity": {"tier": "C"},
+        "is_new": True,
+        "is_nf": True,
+        "forecastability": {
+            "is_forecastable": False,
+            "status": "new_sku",
+            "demand_pattern": None,
+            "adi": None, "cv2": None, "zero_pct": None,
+        },
+        "default_horizon_days": 0,
+        "default_horizon_label": "0",
+        "conversions": _get_conversions(sku_id, None),
+        "best_horizon": None,
+        "priority_horizon": None,
+        "inventory": inventory,
+        "forecasts": {},            # no forecast rows for a NEW SKU
+        "daily_forecasts": {},
+        "gaps": gaps,
+        "open_order_tons_by_horizon": oo_tons_by_horizon,
+        "rm_requirements": [],      # no manifest => no RM mapping
+    })
+
+
 @app.route("/api/sku/<sku_id>")
 def api_sku_detail(sku_id: str):
     if not _db_exists():
@@ -743,8 +833,11 @@ def api_sku_detail(sku_id: str):
     conn = _db()
     manifest = conn.execute("SELECT * FROM sku_manifest WHERE sku = ?", (sku_id,)).fetchone()
     if not manifest:
+        # NEW-SKU path: not in the forecast manifest, but present in the
+        # open-orders feed. Build a p=0-shaped card (open orders vs inventory,
+        # no forecast). Fall through to 404 only if the SKU is nowhere.
         conn.close()
-        return jsonify({"error": f"SKU {sku_id} not found"}), 404
+        return _new_sku_detail_response(sku_id)
     forecasts_raw = conn.execute(
         "SELECT * FROM sku_forecasts WHERE sku = ? ORDER BY horizon_days", (sku_id,)
     ).fetchall()
